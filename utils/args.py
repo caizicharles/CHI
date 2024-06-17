@@ -5,6 +5,9 @@ import yaml
 def get_args():
     parser = argparse.ArgumentParser()
 
+    # Data Paths
+    parser.add_argument('--save_data_path', type=str, default='')
+
     # Model Params
     parser.add_argument('--dataset', type=str, default='mimic-iv')
 
