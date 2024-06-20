@@ -1,3 +1,16 @@
-save_data_path: C:\Users\caizi\Documents\GitHub\CHI\data
+dataset: mimiciv
+task: mortality_prediction
+seed: 0
 
-dataset: mimic-iv
+# Training Setting
+train_proportion: 0.8
+val_proportion: 0.1
+test_proportion: 0.1
+batch_sizze: 3
+
+# Model Configurations
+# embedding_dim: 128
+
+# Paths
+raw_data_path: /home/engs2635/Desktop/caizi/raw_data
+save_data_path: /home/engs2635/Desktop/caizi/CHI/data
