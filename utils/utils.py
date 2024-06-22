@@ -16,7 +16,7 @@ def save_with_pickle(file: object, save_path: str, file_name: str):
     return
 
 
-def load_with_pickle(save_path: str, file_name: str):
+def read_pickle_file(save_path: str, file_name: str):
 
     if not file_name.lower().endswith('.pickle'):
         file_name += '.pickle'
@@ -37,8 +37,8 @@ def save_with_csv(file: dict, header: list, save_path: str, file_name: str):
 
     file_path = osp.join(save_path, file_name)
 
-    with open(file_path, 'w') as file:
-        writer = csv.DictWriter(file, fieldnames=header)
+    with open(file_path, 'w+') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=header)
         writer.writeheader()
         writer.writerows(file)
 
@@ -52,7 +52,49 @@ def read_csv_file(save_path: str, file_name: str):
     assert osp.isfile(file_path), f'Dataset save path: {file_path} is invalid.'
 
     with open(file_path, "r") as f:
-        file = csv.reader(f)
+        file = csv.DictReader(f)
         file = list(file)
 
     return file
+
+
+def csv_formatting(input: dict, header: list):
+
+    assert len(header) == 2, 'Formatting only works for length 2 dictionaries.'
+    output = []
+
+    for (k, v) in input.items():
+        output.append({header[0]: k, header[1]: v})
+
+    return output
+
+
+def save_txt(file: list, save_path: str, file_name: str):
+
+    if not file_name.lower().endswith('.txt'):
+        file_name += '.txt'
+
+    file_path = osp.join(save_path, file_name)
+
+    with open(file_path, 'w') as f:
+        for entry in file:
+            f.write(entry+'\n')
+
+    return
+
+
+def read_txt_file(save_path: str, file_name: str):
+
+    if not file_name.lower().endswith('.txt'):
+        file_name += '.txt'
+
+    file_path = osp.join(save_path, file_name)
+    assert osp.isfile(file_path), f'Dataset save path: {file_path} is invalid.'
+
+    with open(file_path, "r") as f:
+        data = f.read()
+    
+    data = data.split('\n')
+    data = data[:-1] if data[-1] == '' else data
+
+    return data
