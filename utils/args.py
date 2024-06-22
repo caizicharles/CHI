@@ -15,12 +15,14 @@ def get_args():
     parser.add_argument('--test_proportion', type=float, default=0.1)
     parser.add_argument('--batch_size', type=int, default=3)
 
+    # Model Params
+    parser.add_argument('--node_embed_dim', type=int, default=128)
+    parser.add_argument('--edge_embed_dim', type=int, default=128)
+
     # Data Paths
     parser.add_argument('--raw_data_path', type=str, default='')
     parser.add_argument('--save_data_path', type=str, default='')
-
-    # Model Params
-    
+    parser.add_argument('--prompt_path', type=str, default='')
 
     # Config File
     config_parser = argparse.ArgumentParser(description='Algorithm Config', add_help=False)
