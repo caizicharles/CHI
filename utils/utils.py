@@ -1,5 +1,6 @@
 import pickle
 import csv
+import re
 import os.path as osp
 
 
@@ -69,7 +70,7 @@ def csv_formatting(input: dict, header: list):
     return output
 
 
-def save_txt(file: list, save_path: str, file_name: str):
+def save_txt(file, save_path: str, file_name: str):
 
     if not file_name.lower().endswith('.txt'):
         file_name += '.txt'
@@ -78,7 +79,7 @@ def save_txt(file: list, save_path: str, file_name: str):
 
     with open(file_path, 'w') as f:
         for entry in file:
-            f.write(entry+'\n')
+            f.write(f'{entry}\n')
 
     return
 
@@ -98,3 +99,20 @@ def read_txt_file(save_path: str, file_name: str):
     data = data[:-1] if data[-1] == '' else data
 
     return data
+
+
+def StringtoList(input: list):
+
+    output = []
+    for row in input:
+        entry = row.split(' ')
+        # entry = re.findall(r'\'.*?\'', row)
+        data = []
+        data.append(entry[0][1:-2])
+        # for element in entry:
+        #     _element = element.replace('\'', '')
+        #     _element = _element.replace('\'', '')
+        #     data.append(_element)
+        # output.append(data)
+
+    return output
