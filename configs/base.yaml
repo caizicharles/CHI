@@ -6,16 +6,18 @@ seed: 0
 train_proportion: 0.8
 val_proportion: 0.1
 test_proportion: 0.1
-batch_sizze: 3
+batch_size: 3
+num_epochs: 50
+val_freq: 5
 
-# LLM Configurations
-
+# KG Configurations
+triplet_method: co-occurrence
 
 # Model Configurations
-node_embed_dim: 128
-edge_embed_dim: 128
+node_embed_dim: 8
+edge_embed_dim: 8
 
 # Paths
 raw_data_path: /home/engs2635/Desktop/caizi/raw_data
 save_data_path: /home/engs2635/Desktop/caizi/CHI/data/mimiciv
-prompt_path: /home/engs2635/Desktop/caizi/prompts
+graph_construction_path: /home/engs2635/Desktop/caizi/graph_construction

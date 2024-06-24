@@ -14,15 +14,20 @@ def get_args():
     parser.add_argument('--val_proportion', type=float, default=0.1)
     parser.add_argument('--test_proportion', type=float, default=0.1)
     parser.add_argument('--batch_size', type=int, default=3)
+    parser.add_argument('--num_epochs', type=int, default=50)
+    parser.add_argument('--val_freq', type=int, default=5)
 
-    # Model Params
+    # Model Configs
     parser.add_argument('--node_embed_dim', type=int, default=128)
     parser.add_argument('--edge_embed_dim', type=int, default=128)
+
+    # KG Configs
+    parser.add_argument('--triplet_method', type=str, default='LLM')
 
     # Data Paths
     parser.add_argument('--raw_data_path', type=str, default='')
     parser.add_argument('--save_data_path', type=str, default='')
-    parser.add_argument('--prompt_path', type=str, default='')
+    parser.add_argument('--graph_construction_path', type=str, default='')
 
     # Config File
     config_parser = argparse.ArgumentParser(description='Algorithm Config', add_help=False)
