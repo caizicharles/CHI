@@ -14,8 +14,10 @@ val_freq: 5
 triplet_method: co-occurrence
 
 # Model Configurations
-node_embed_dim: 8
-edge_embed_dim: 8
+embed_dim: 8
+gnn_layer: 3
+gnn_hidden_dim: 128
+trans_hidden_dim: 128
 
 # Paths
 raw_data_path: /home/engs2635/Desktop/caizi/raw_data
