@@ -59,13 +59,28 @@ def read_csv_file(save_path: str, file_name: str):
     return file
 
 
-def csv_formatting(input: dict, header: list):
+def format_for_csv(input: dict, header: list):
 
     assert len(header) == 2, 'Formatting only works for length 2 dictionaries.'
     output = []
 
     for (k, v) in input.items():
         output.append({header[0]: k, header[1]: v})
+
+    return output
+
+
+def format_from_csv(input: list):
+
+    output = {}
+    header = list(input[0].keys())
+
+    for head in header:
+        output[head] = []
+
+    for row in input:
+        for (k, v) in row.items():
+            output[k].append(v)
 
     return output
 
@@ -94,7 +109,7 @@ def read_txt_file(save_path: str, file_name: str):
 
     with open(file_path, "r") as f:
         data = f.read()
-    
+
     data = data.split('\n')
     data = data[:-1] if data[-1] == '' else data
 
