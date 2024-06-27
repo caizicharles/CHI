@@ -1,4 +1,5 @@
 import torch
+from torch_geometric.data import Data
 import random
 
 
@@ -40,7 +41,12 @@ class DataLoader():
                 self._shuffle_data()
             raise StopIteration
 
-        batch_data = self.dataset[self.current_index:self.current_index + self.batch_size]
+        _batch_data = self.dataset[self.current_index:self.current_index + self.batch_size]
         self.current_index += self.batch_size
+
+        batch_data = Data()
+        batch_data.edge_index = self.dataset.edge_index
+        node_ids = [data['node_ids'] for data in _batch_data]
+        batch_data.node_ids = torch.stack(node_ids)
 
         return batch_data
