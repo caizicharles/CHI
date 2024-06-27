@@ -2,6 +2,13 @@ dataset: mimiciv
 task: mortality_prediction
 seed: 0
 
+# Data Processing
+age_thresh_low: 18
+age_thresh_high: 80
+code_freq_filter: 60
+visit_thresh: 15
+pad_dim: 60
+
 # Training Setting
 train_proportion: 0.8
 val_proportion: 0.1
@@ -18,6 +25,10 @@ embed_dim: 8
 gnn_layer: 3
 gnn_hidden_dim: 128
 trans_hidden_dim: 128
+
+optimizer: Adam
+lr: 0.00001
+weight_decay: 0.00001
 
 # Paths
 raw_data_path: /home/engs2635/Desktop/caizi/raw_data
