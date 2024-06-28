@@ -20,7 +20,7 @@ class DataLoader():
         random.shuffle(self.dataset.dataset)
 
     def __len__(self):
-        return len(self.dataset)
+        return len(self.dataset) // self.batch_size
 
     def __getitem__(self, idx):
         return self.dataset[idx]
@@ -46,7 +46,10 @@ class DataLoader():
 
         batch_data = Data()
         batch_data.edge_index = self.dataset.edge_index
+        batch_data.edge_attr = self.dataset.edge_attr
         node_ids = [data['node_ids'] for data in _batch_data]
+        labels = [[data['y']] for data in _batch_data]
         batch_data.node_ids = torch.stack(node_ids)
+        batch_data.labels = torch.tensor(labels)
 
         return batch_data
