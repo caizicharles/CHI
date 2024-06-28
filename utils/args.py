@@ -1,5 +1,6 @@
 import argparse
 import yaml
+from utils import get_time_str
 
 
 def get_args():
@@ -54,6 +55,8 @@ def get_args():
         parser.set_defaults(**cfg)
 
     args = parser.parse_args(remaining)
+
+    args.start_time = get_time_str()
 
     assert args.train_proportion + args.val_proportion + args.test_proportion == 1., 'train-val-test split should sum to 1'
     # if args.code_freq_filter != 0:

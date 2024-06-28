@@ -21,10 +21,15 @@ val_freq: 5
 triplet_method: co-occurrence
 
 # Model Configurations
+prototype_num: 5
 embed_dim: 8
 gnn_layer: 3
 gnn_hidden_dim: 128
-trans_hidden_dim: 128
+set_num_heads: 2
+set_encoder_depth: 2
+set_decoder_depth: 2
+set_trans_hidden_dim: 128
+set_trans_out_dim: 128
 
 optimizer: Adam
 lr: 0.00001
@@ -34,3 +39,4 @@ weight_decay: 0.00001
 raw_data_path: /home/engs2635/Desktop/caizi/raw_data
 save_data_path: /home/engs2635/Desktop/caizi/CHI/data/mimiciv
 graph_construction_path: /home/engs2635/Desktop/caizi/graph_construction
+log_dir: /home/engs2635/Desktop/caizi/CHI/logs
