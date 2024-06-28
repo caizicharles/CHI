@@ -14,6 +14,9 @@ from dataset import preprocess_dataset, MIMICIVBaseDataset, split_by_patient, Da
 from model import get_graph_nodes, get_triplets, map_to_nodes, format_code_map, generate_graph, \
     OurModel, OPTIMIZERS, SCHEDULERS
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+logger = logging.getLogger()
+
 
 def seed_everything(seed: int):
     random.seed(seed)
@@ -87,8 +90,7 @@ def single_validate(model, device, val_loader, criterion):
 
 def main(args):
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logger = init_logger()
+    writer = init_logger(args)
     logger.info('Process begins...')
 
     seed_everything(args.seed)
@@ -103,7 +105,6 @@ def main(args):
     nodes = file_lib['nodes']
     nodes_in_visits = file_lib['nodes_in_visits']
     triplets = file_lib['triplets']
-
 
     patients = preprocess_dataset(raw_dataset_path=args.raw_data_path,
                                   dataset_name=args.dataset,
@@ -150,7 +151,6 @@ def main(args):
     ratio = [args.train_proportion, args.val_proportion, args.test_proportion]
     train_patients, val_patients, test_patients = split_by_patient(patients, ratio)
 
-
     if triplets is None:
         triplets = get_triplets(triplet_method=args.triplet_method,
                                 nodes=nodes,
@@ -158,9 +158,8 @@ def main(args):
                                 patients=patients,
                                 co_threshold=3)
 
-    graph = generate_graph(nodes, triplets, args.triplet_method)
-    logger.info('Graph is generated')
-
+    # graph = generate_graph(nodes, triplets, args.triplet_method)
+    # logger.info('Graph is generated')
 
     train_dataset = MIMICIVBaseDataset(
         patients=train_patients,
@@ -172,6 +171,7 @@ def main(args):
         procedures_map=procedures_maps,
         prescriptions_map=prescriptions_maps,
         nodes_in_visits=nodes_in_visits,
+        triplet_method=args.triplet_method,
         code_pad_dim=args.pad_dim,
         visit_pad_dim=args.visit_thresh)
     logger.info('Dataset ready')
@@ -214,20 +214,28 @@ def main(args):
     optimizer = OPTIMIZERS[args.optimizer](model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     # scheduler = SCHEDULERS[args.scheduler]()
 
+    global_iter_idx = 0
 
     for epoch_idx in range(args.num_epochs):
         # Train
-        single_train(model, device, train_loader, criterion, optimizer)
+        single_train(model, train_loader, epoch_idx, global_iter_idx, criterion, optimizer, writer=writer)
 
         # Validate
         # if epoch_idx % args.val_freq == 0:
         #     single_validate()
 
-
     return
 
 
-def single_train(model, device, dataloader, criterion, optimizer, scheduler=None):
+def single_train(model,
+                 dataloader,
+                 epoch_idx,
+                 global_iter_idx,
+                 criterion,
+                 optimizer,
+                 scheduler=None,
+                 logging_freq=10,
+                 writer=None):
 
     model.train()
 
@@ -235,14 +243,21 @@ def single_train(model, device, dataloader, criterion, optimizer, scheduler=None
         data = data.to(device)
         optimizer.zero_grad()
 
-        exit()
+        out = model(data.node_ids, data.edge_index, data.edge_attr)
 
-        out = model(data.node_ids, data.edge_index)
-
-        labels = None
+        labels = data.labels
         loss = criterion(out, labels)
         loss.backward()
         optimizer.step()
+
+        if idx % logging_freq == 0:
+            logger.info(
+                f"Epoch: {epoch_idx:4d}, Iteration: {idx:4d} / {len(dataloader):4d} [{global_iter_idx:5d}], Loss: {loss.item()}"
+            )
+        if writer is not None:
+            writer.add_scalar('train/loss', loss.item(), global_iter_idx)
+
+        global_iter_idx += 1
 
     if scheduler is not None:
         scheduler.step()
