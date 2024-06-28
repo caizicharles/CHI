@@ -12,28 +12,6 @@ import time
 import multiprocessing as mp
 
 
-def split_by_patient(patients: dict, ratio: list):
-
-    patients_k = np.array(list(patients.keys()))
-
-    patient_num = len(patients)
-    indices = list(np.arange(patient_num))
-
-    train_num = int(ratio[0] * patient_num)
-    val_num = int(ratio[1] * patient_num)
-
-    train_indices = sorted(random.sample(indices, k=train_num))
-    remain_indices = list(set(indices) - set(train_indices))
-    val_indices = sorted(random.sample(remain_indices, k=val_num))
-    test_indices = sorted(list(set(remain_indices) - set(val_indices)))
-
-    train_patients = {key: patients[key] for key in patients_k[train_indices]}
-    val_patients = {key: patients[key] for key in patients_k[val_indices]}
-    test_patients = {key: patients[key] for key in patients_k[test_indices]}
-
-    return train_patients, val_patients, test_patients
-
-
 class MIMICIVBaseDataset(data.Dataset):
 
     def __init__(
@@ -47,6 +25,7 @@ class MIMICIVBaseDataset(data.Dataset):
             procedures_map,
             prescriptions_map,
             nodes_in_visits,
+            triplet_method,
             code_pad_dim=None,
             visit_pad_dim=None,
             dataset_path=None):
@@ -59,6 +38,7 @@ class MIMICIVBaseDataset(data.Dataset):
         self.procedures_map = procedures_map
         self.prescriptions_map = prescriptions_map
         self.nodes_in_visits = nodes_in_visits
+        self.triplet_method = triplet_method
         self.code_pad_dim = code_pad_dim
         self.visit_pad_dim = visit_pad_dim
         self.PAD_NAME = 'N/A'
@@ -76,8 +56,8 @@ class MIMICIVBaseDataset(data.Dataset):
                 self.dataset = self.construct_dataset(dataset=self.dataset,
                                                       nodes=nodes,
                                                       triplets=triplets,
-                                                      nodes_in_visits=nodes_in_visits)
-                # save_with_pickle(self.dataset, '/home/engs2635/Desktop/caizi/CHI/data/mimiciv', 'padded_mimiciv.pickle')
+                                                      triplet_method=triplet_method)
+                # save_with_pickle(self.dataset, '/home/engs2635/Desktop/caizi/CHI/data/mimiciv', 'ready_mimiciv.pickle')
 
     @property
     def num_nodes(self):
@@ -237,7 +217,7 @@ class MIMICIVBaseDataset(data.Dataset):
 
         return edges, edge_indices, edge_loc
 
-    def construct_dataset(self, dataset, nodes, triplets, nodes_in_visits):
+    def construct_dataset(self, dataset, nodes, triplets, triplet_method):
 
         nodes = np.array(nodes) if type(nodes) != np.ndarray else nodes
         triplets = np.array(triplets) if type(triplets) != np.ndarray else triplets
@@ -264,16 +244,18 @@ class MIMICIVBaseDataset(data.Dataset):
         dst_list = []
         src_dst = triplets[:, [1, -1]]
 
+        if triplet_method == 'co-occurence':
+            edge_weights = triplets[:, 2].astype(int)
+            self.edge_attr = edge_weights
+        else:
+            relations = triplets[:, 2]
+            # TODO
+
         for src, dst in src_dst:
             src_list.append(np.where(nodes == src)[0][0])
             dst_list.append(np.where(nodes == dst)[0][0])
 
         self.edge_index = torch.tensor([src_list, dst_list])
-
-        # node_ids = torch.tensor(node_ids) if type(node_ids) != torch.Tensor else node_ids
-        # edge_ids = torch.tensor(edge_ids) if type(edge_ids) != torch.Tensor else edge_ids
-        # edge_idx = torch.tensor(edge_idx) if type(edge_idx) != torch.Tensor else edge_idx
-        # label = torch.tensor(label) if type(label) != torch.Tensor else label
 
         return dataset
 
@@ -282,137 +264,25 @@ class MIMICIVBaseDataset(data.Dataset):
 
     def __getitem__(self, index):
         return self.dataset[index]
-        # return self.get_subset(index,
-        #                        self.dataset,
-        #                        self.nodes,
-        #                        self.triplets,
-        #                        self.nodes_in_visits)
 
 
-# class MIMICIVBaseDataset(data.Dataset):
+def split_by_patient(patients: dict, ratio: list):
 
-#     def __init__(self,
-#                  dataset,
-#                  task,
-#                  nodes,
-#                  graph,
-#                  triplets,
-#                  diagnoses_map,
-#                  procedures_map,
-#                  prescriptions_map,
-#                  nodes_in_visits,
-#                  pad_dim=None):
+    patients_k = np.array(list(patients.keys()))
 
-#         self.dataset = dataset
-#         self.task = task
-#         self.graph = graph
-#         self.nodes = nodes
-#         self.triplets = triplets
-#         self.diagnoses_map = diagnoses_map
-#         self.procedures_map = procedures_map
-#         self.prescriptions_map = prescriptions_map
-#         self.nodes_in_visits = nodes_in_visits
-#         self.pad_dim = pad_dim
-#         self.PAD_ID = -1
+    patient_num = len(patients)
+    indices = list(np.arange(patient_num))
 
-#         self.x = []
+    train_num = int(ratio[0] * patient_num)
+    val_num = int(ratio[1] * patient_num)
 
-#     @property
-#     def num_nodes(self):
-#         return len(self.nodes)
+    train_indices = sorted(random.sample(indices, k=train_num))
+    remain_indices = list(set(indices) - set(train_indices))
+    val_indices = sorted(random.sample(remain_indices, k=val_num))
+    test_indices = sorted(list(set(remain_indices) - set(val_indices)))
 
-#     @property
-#     def num_edges(self):
-#         return len(self.triplets)
+    train_patients = {key: patients[key] for key in patients_k[train_indices]}
+    val_patients = {key: patients[key] for key in patients_k[val_indices]}
+    test_patients = {key: patients[key] for key in patients_k[test_indices]}
 
-#     def find_code(self, code_name: str, table: str):
-
-#         assert table in ["diagnoses", "procedures", "prescriptions"], 'Unsupported table type: {table}'
-
-#         if table == 'diagnoses':
-#             return self.diagnoses_map[1][code_name]
-#         elif table == 'procedures':
-#             return self.procedures_map[1][code_name]
-#         elif table == 'prescriptions':
-#             return self.prescriptions_map[1][code_name]
-
-#     def find_code_name(self, code: str, table: str):
-
-#         assert table in ["diagnoses", "procedures", "prescriptions"], 'Unsupported table type: {table}'
-
-#         if table == 'diagnoses':
-#             return self.diagnoses_map[0][code]
-#         elif table == 'procedures':
-#             return self.procedures_map[0][code]
-#         elif table == 'prescriptions':
-#             return self.prescriptions_map[0][code]
-
-#     def extract_visit_edges(self, nodes_in_visit, nodes, triplets):
-
-#         src_dst = triplets[:, [1,-1]]
-
-#         edge_indices = []
-#         edge_loc = []
-
-#         pairwise_combinations = list(itertools.permutations(nodes_in_visit, 2))
-#         for pair in pairwise_combinations:
-#             loc = np.where(np.all(src_dst == pair, axis=1))[0][0]
-#             edge_loc.append(loc)
-
-#             src_idx = np.where(nodes == pair[0])[0][0]
-#             dst_idx = np.where(nodes == pair[1])[0][0]
-#             edge_indices.append([[src_idx], [dst_idx]])
-
-#         edges = triplets[edge_loc]
-#         edges = edges[:, 1:]
-
-#         return edges, edge_indices, edge_loc
-
-#     def get_subset(self, index, dataset, nodes, triplets, nodes_in_visits, pad_dim=None):
-
-#         nodes = np.array(nodes) if type(nodes) != np.ndarray else nodes
-#         triplets = np.array(triplets) if type(triplets) != np.ndarray else triplets
-
-#         visit_data = dataset[index]
-#         visit_id = visit_data['visit_id']
-#         label = visit_data['label']
-
-#         node_ids = []
-#         node_types = nodes_in_visits[visit_id]
-#         for node_type in node_types:
-#             node_ids.append(np.where(nodes == node_type)[0][0])
-
-#         if pad_dim is not None:
-#             pad_length = pad_dim - len(node_ids)
-
-#             for _ in range(pad_length):
-#                 node_ids.append(self.PAD_ID)
-
-#         edges, edge_idx, edge_ids = self.extract_visit_edges(node_types, nodes, triplets)
-
-#         node_ids = torch.tensor(node_ids) if type(node_ids) != torch.Tensor else node_ids
-#         edge_ids = torch.tensor(edge_ids) if type(edge_ids) != torch.Tensor else edge_ids
-#         edge_idx = torch.tensor(edge_idx) if type(edge_idx) != torch.Tensor else edge_idx
-#         label = torch.tensor(label) if type(label) != torch.Tensor else label
-
-#         # print(node_ids)
-#         self.x.append(len(edge_ids))
-
-#         return {
-#             # 'nodes': node_types,
-#                 'node_ids': node_ids,
-#                 # 'edges': edges,
-#                 'edge_ids': edge_ids,
-#                 'edge_idx': edge_idx,
-#                 'label': label}
-
-#     def __len__(self):
-#         return len(self.dataset)
-
-#     def __getitem__(self, index):
-#         return self.get_subset(index,
-#                                self.dataset,
-#                                self.nodes,
-#                                self.triplets,
-#                                self.nodes_in_visits,
-#                                self.pad_dim)
+    return train_patients, val_patients, test_patients
