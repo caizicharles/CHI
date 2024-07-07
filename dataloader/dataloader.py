@@ -41,15 +41,20 @@ class DataLoader():
                 self._shuffle_data()
             raise StopIteration
 
-        _batch_data = self.dataset[self.current_index:self.current_index + self.batch_size]
+        grouped_patients = self.dataset[self.current_index:self.current_index + self.batch_size]
         self.current_index += self.batch_size
 
         batch_data = Data()
         batch_data.edge_index = self.dataset.edge_index
         batch_data.edge_attr = self.dataset.edge_attr
-        node_ids = [data['node_ids'] for data in _batch_data]
-        labels = [[data['y']] for data in _batch_data]
+        node_ids = [data['node_ids'] for data in grouped_patients]
+        labels = [[data['y']] for data in grouped_patients]
+        visit_rel_times = [data['visit_rel_times'] for data in grouped_patients]
+        visit_order = [data['visit_order'] for data in grouped_patients]
+
         batch_data.node_ids = torch.stack(node_ids)
         batch_data.labels = torch.tensor(labels)
+        batch_data.visit_rel_times = torch.stack(visit_rel_times)
+        batch_data.visit_order = torch.stack(visit_order)
 
         return batch_data
