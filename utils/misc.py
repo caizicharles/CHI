@@ -2,6 +2,7 @@ import logging
 import tensorboardX
 import os.path as osp
 import time
+import datetime
 
 
 def init_logger(args):
@@ -21,3 +22,7 @@ def init_logger(args):
 
 def get_time_str():
     return time.strftime('%Y%m%d_%H%M%S', time.localtime())
+
+
+def str_to_datetime(time: str, format: str):
+    return datetime.datetime.strptime(time, format)
