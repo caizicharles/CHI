@@ -21,15 +21,26 @@ val_freq: 5
 triplet_method: co-occurrence
 
 # Model Configurations
-prototype_num: 5
-embed_dim: 8
-gnn_layer: 3
+start_embed_dim: 8
+gnn_layer: 2
 gnn_hidden_dim: 128
-set_num_heads: 2
+
+set_head_num: 2
 set_encoder_depth: 2
 set_decoder_depth: 2
 set_trans_hidden_dim: 128
 set_trans_out_dim: 128
+set_trans_out_num: 1
+
+proto_num: 5
+proto_head_num: 4
+proto_depth: 1
+proto_hidden_dim: 128
+proto_out_dim: 128
+
+max_week_num: 630
+time_trans_hidden_dim: 128
+time_trans_out_dim: 64
 
 optimizer: Adam
 lr: 0.00001
