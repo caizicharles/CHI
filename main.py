@@ -9,10 +9,21 @@ import tensorboardX
 
 import matplotlib.pyplot as plt
 
-from utils import *
-from dataset import preprocess_dataset, MIMICIVBaseDataset, split_by_patient, DataLoader
-from model import get_graph_nodes, get_triplets, map_to_nodes, format_code_map, generate_graph, \
-    OurModel, OPTIMIZERS, SCHEDULERS
+# from utils import *
+
+# from model import get_graph_nodes, map_to_nodes, generate_graph
+
+from utils.misc import init_logger
+from utils.args import get_args
+from utils.utils import *
+
+from dataset.data_processing import preprocess_dataset
+from dataset.dataset import MIMICIVBaseDataset, split_by_patient
+from dataloader.dataloader import DataLoader
+
+from model.graph_construction import get_triplets, format_code_map
+from model.model import OurModel
+from model.optimizer_scheduler import OPTIMIZERS, SCHEDULERS
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 logger = logging.getLogger()
@@ -118,6 +129,7 @@ def main(args):
                                       'visit_thresh': args.visit_thresh
                                   })
     logger.info('Dataset preprocessing complete')
+
     '''
     # count = 0
     # length = []
@@ -161,19 +173,17 @@ def main(args):
     # graph = generate_graph(nodes, triplets, args.triplet_method)
     # logger.info('Graph is generated')
 
-    train_dataset = MIMICIVBaseDataset(
-        patients=train_patients,
-        task=args.task,
-        #    graph=graph,
-        nodes=nodes,
-        triplets=triplets,
-        diagnoses_map=diagnoses_maps,
-        procedures_map=procedures_maps,
-        prescriptions_map=prescriptions_maps,
-        nodes_in_visits=nodes_in_visits,
-        triplet_method=args.triplet_method,
-        code_pad_dim=args.pad_dim,
-        visit_pad_dim=args.visit_thresh)
+    train_dataset = MIMICIVBaseDataset(patients=train_patients,
+                                       task=args.task,
+                                       nodes=nodes,
+                                       triplets=triplets,
+                                       diagnoses_map=diagnoses_maps,
+                                       procedures_map=procedures_maps,
+                                       prescriptions_map=prescriptions_maps,
+                                       nodes_in_visits=nodes_in_visits,
+                                       triplet_method=args.triplet_method,
+                                       code_pad_dim=args.pad_dim,
+                                       visit_pad_dim=args.visit_thresh)
     logger.info('Dataset ready')
     '''
     val_dataset = MIMICIVBaseDataset(dataset=val_dataset,
@@ -202,12 +212,29 @@ def main(args):
 
     out_dim, criterion = task_configuring_model(args.task, prescriptions_maps[0])
 
-    model = OurModel(num_nodes=len(nodes),
+    model = OurModel(device=device,
+                     num_nodes=len(nodes),
                      num_edges=len(triplets),
-                     embed_dim=args.embed_dim,
+                     num_visits=args.visit_thresh,
+                     max_weeks_between=args.max_week_num,
+                     start_embed_dim=args.start_embed_dim,
                      gnn_hidden_dim=args.gnn_hidden_dim,
-                     trans_hidden_dim=args.trans_hidden_dim,
-                     out_dim=out_dim)
+                     set_trans_hidden_dim=args.set_trans_hidden_dim,
+                     set_trans_out_dim=args.set_trans_out_dim,
+                     proto_hidden_dim=args.proto_hidden_dim,
+                     proto_out_dim=args.proto_out_dim,
+                     time_trans_hidden_dim=args.time_trans_hidden_dim,
+                     time_trans_out_dim=args.time_trans_out_dim,
+                     out_dim=out_dim,
+                     gnn_layer=args.gnn_layer,
+                     proto_num=args.proto_num,
+                     set_head_num=args.set_head_num,
+                     set_num_inds=args.visit_thresh,
+                     set_encoder_depth=args.set_encoder_depth,
+                     set_decoder_depth=args.set_decoder_depth,
+                     set_trans_out_num=args.set_trans_out_num,
+                     proto_head_num=args.proto_head_num,
+                     proto_depth=args.proto_depth)
 
     model.to(device)
 
@@ -241,9 +268,10 @@ def single_train(model,
 
     for idx, data in enumerate(dataloader):
         data = data.to(device)
+        
         optimizer.zero_grad()
 
-        out = model(data.node_ids, data.edge_index, data.edge_attr)
+        out = model(data.node_ids, data.edge_index, data.edge_attr, data.visit_rel_times, data.visit_order)
 
         labels = data.labels
         loss = criterion(out, labels)
