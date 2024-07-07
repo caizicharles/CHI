@@ -6,10 +6,8 @@ import itertools
 import random
 from tqdm import tqdm
 
-from utils import *
-
-import time
-import multiprocessing as mp
+from utils.utils import *
+from utils.misc import str_to_datetime
 
 
 class MIMICIVBaseDataset(data.Dataset):
@@ -67,6 +65,12 @@ class MIMICIVBaseDataset(data.Dataset):
     def num_edges(self):
         return len(self.triplets)
 
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index):
+        return self.dataset[index]
+
     def find_code(self, code_name: str, table: str):
 
         assert table in ["diagnoses", "procedures", "prescriptions"], 'Unsupported table type: {table}'
@@ -120,15 +124,18 @@ class MIMICIVBaseDataset(data.Dataset):
         patient_input = {
             'patient_id': None,
             'visit_ids': [],
-            #  'visit_x_map': [],
+            'visit_encounters': [],
+            'visit_discharges': [],
             'x': [],
-            'y': None
+            'y': None,
         }
 
         patient_input['patient_id'] = patient.patient_id
 
         for (i, visit) in enumerate(patient):
             patient_input['visit_ids'].append(visit.visit_id)
+            patient_input['visit_encounters'].append(visit.encounter_time)
+            patient_input['visit_discharges'].append(visit.discharge_time)
             codes = self.nodes_in_visits[visit.visit_id]
             # patient_input['visit_x_map'].append([i]*len(codes))
             patient_input['x'].append(codes)
@@ -222,7 +229,11 @@ class MIMICIVBaseDataset(data.Dataset):
         nodes = np.array(nodes) if type(nodes) != np.ndarray else nodes
         triplets = np.array(triplets) if type(triplets) != np.ndarray else triplets
 
+
+
+        
         for patient in dataset:
+            # node_ids
             visit_codes = patient['x']
             node_ids = []
 
@@ -240,49 +251,67 @@ class MIMICIVBaseDataset(data.Dataset):
             node_ids = torch.tensor(node_ids)
             patient['node_ids'] = node_ids
 
+            # visit_rel_times and visit_order
+            encounters = patient['visit_encounters']
+            discharges = patient['visit_discharges']
+            visit_rel_times = []
+            hist_time = 0
+
+            for enc, dis in zip(encounters, discharges):
+                if hist_time == 0:
+                    visit_rel_times.append(0)
+                
+                else:
+                    day_dif = (enc-hist_time).days
+                    week_dif = abs(day_dif) // 7
+                    visit_rel_times.append(week_dif + 1)
+
+                hist_time = dis
+
+            visit_rel_times = torch.tensor(visit_rel_times)
+            pad = torch.zeros(len(visit_codes)-len(visit_rel_times))
+            visit_rel_times = torch.cat((visit_rel_times, pad), dim=0).to(torch.int)
+            patient['visit_rel_times'] = visit_rel_times
+            visit_order = torch.arange(len(visit_codes), dtype=int)
+            patient['visit_order'] = visit_order
+
         src_list = []
         dst_list = []
         src_dst = triplets[:, [1, -1]]
 
-        if triplet_method == 'co-occurence':
-            edge_weights = triplets[:, 2].astype(int)
-            self.edge_attr = edge_weights
+        # edge_attr
+        if triplet_method == 'co-occurrence':
+            edge_weights = triplets[:, 2].astype(float)
+            self.edge_attr = torch.tensor(edge_weights)
         else:
             relations = triplets[:, 2]
             # TODO
 
+        # edge_index
         for src, dst in src_dst:
-            src_list.append(np.where(nodes == src)[0][0])
-            dst_list.append(np.where(nodes == dst)[0][0])
+            src_list.append(np.where(nodes == src)[0][0]+1)
+            dst_list.append(np.where(nodes == dst)[0][0]+1)
 
         self.edge_index = torch.tensor([src_list, dst_list])
 
         return dataset
 
-    def __len__(self):
-        return len(self.dataset)
-
-    def __getitem__(self, index):
-        return self.dataset[index]
-
 
 def split_by_patient(patients: dict, ratio: list):
 
-    patients_k = np.array(list(patients.keys()))
-
     patient_num = len(patients)
-    indices = list(np.arange(patient_num))
+    patients_k = np.array(list(patients.keys()))
+    np.random.shuffle(patients_k)
 
     train_num = int(ratio[0] * patient_num)
     val_num = int(ratio[1] * patient_num)
 
-    train_indices = sorted(random.sample(indices, k=train_num))
-    remain_indices = list(set(indices) - set(train_indices))
-    val_indices = sorted(random.sample(remain_indices, k=val_num))
-    test_indices = sorted(list(set(remain_indices) - set(val_indices)))
+    train_k = patients_k[:train_num]
+    val_k = patients_k[train_num:train_num + val_num]
+    test_k = patients_k[train_num + val_num:]
 
-    train_patients = {key: patients[key] for key in patients_k[train_indices]}
-    val_patients = {key: patients[key] for key in patients_k[val_indices]}
-    test_patients = {key: patients[key] for key in patients_k[test_indices]}
+    train_patients = {key: patients[key] for key in train_k}
+    val_patients = {key: patients[key] for key in val_k}
+    test_patients = {key: patients[key] for key in test_k}
 
     return train_patients, val_patients, test_patients
