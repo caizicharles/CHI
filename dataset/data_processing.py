@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from utils import *
+from utils.utils import *
 
 
 def preprocess_dataset(raw_dataset_path: str,
