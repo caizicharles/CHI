@@ -51,10 +51,12 @@ class DataLoader():
         labels = [[data['y']] for data in grouped_patients]
         visit_rel_times = [data['visit_rel_times'] for data in grouped_patients]
         visit_order = [data['visit_order'] for data in grouped_patients]
+        attn_mask = [data['padding_mask'] for data in grouped_patients]
 
         batch_data.node_ids = torch.stack(node_ids)
         batch_data.labels = torch.tensor(labels)
         batch_data.visit_rel_times = torch.stack(visit_rel_times)
         batch_data.visit_order = torch.stack(visit_order)
+        batch_data.attn_mask = torch.stack(attn_mask)
 
         return batch_data

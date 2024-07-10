@@ -124,8 +124,10 @@ class MIMICIVBaseDataset(data.Dataset):
         patient_input = {
             'patient_id': None,
             'visit_ids': [],
+            'node_ids': None,
             'visit_encounters': [],
             'visit_discharges': [],
+            'padding_mask': [],
             'x': [],
             'y': None,
         }
@@ -142,9 +144,9 @@ class MIMICIVBaseDataset(data.Dataset):
 
             if i == len(patient) - 1:
                 if visit.discharge_status not in [0, 1]:
-                    patient_input['y'] = 0
+                    patient_input['y'] = 0.
                 else:
-                    patient_input['y'] = int(visit.discharge_status)
+                    patient_input['y'] = float(visit.discharge_status)
 
         # patient_input['visit_x_map'] = [val for sub in patient_input['visit_x_map'] for val in sub]
         # patient_input['x'] = [val for sub in patient_input['x'] for val in sub]
@@ -229,27 +231,31 @@ class MIMICIVBaseDataset(data.Dataset):
         nodes = np.array(nodes) if type(nodes) != np.ndarray else nodes
         triplets = np.array(triplets) if type(triplets) != np.ndarray else triplets
 
-
-
-        
         for patient in dataset:
-            # node_ids
+            # node_ids and padding_mask
             visit_codes = patient['x']
             node_ids = []
+            padding_mask = []
 
             for codes in visit_codes:
                 single_visit_ids = []
+                single_visit_mask = []
 
                 for code in codes:
                     if code == self.PAD_NAME:
                         single_visit_ids.append(0)
+                        single_visit_mask.append(True)
                     else:
                         single_visit_ids.append(np.where(nodes == code)[0][0] + 1)
+                        single_visit_mask.append(False)
 
                 node_ids.append(single_visit_ids)
+                padding_mask.append(single_visit_mask)
 
             node_ids = torch.tensor(node_ids)
             patient['node_ids'] = node_ids
+            padding_mask = torch.tensor(padding_mask)
+            patient['padding_mask'] = padding_mask
 
             # visit_rel_times and visit_order
             encounters = patient['visit_encounters']
@@ -260,16 +266,16 @@ class MIMICIVBaseDataset(data.Dataset):
             for enc, dis in zip(encounters, discharges):
                 if hist_time == 0:
                     visit_rel_times.append(0)
-                
+
                 else:
-                    day_dif = (enc-hist_time).days
+                    day_dif = (enc - hist_time).days
                     week_dif = abs(day_dif) // 7
                     visit_rel_times.append(week_dif + 1)
 
                 hist_time = dis
 
             visit_rel_times = torch.tensor(visit_rel_times)
-            pad = torch.zeros(len(visit_codes)-len(visit_rel_times))
+            pad = torch.zeros(len(visit_codes) - len(visit_rel_times))
             visit_rel_times = torch.cat((visit_rel_times, pad), dim=0).to(torch.int)
             patient['visit_rel_times'] = visit_rel_times
             visit_order = torch.arange(len(visit_codes), dtype=int)
@@ -289,8 +295,8 @@ class MIMICIVBaseDataset(data.Dataset):
 
         # edge_index
         for src, dst in src_dst:
-            src_list.append(np.where(nodes == src)[0][0]+1)
-            dst_list.append(np.where(nodes == dst)[0][0]+1)
+            src_list.append(np.where(nodes == src)[0][0] + 1)
+            dst_list.append(np.where(nodes == dst)[0][0] + 1)
 
         self.edge_index = torch.tensor([src_list, dst_list])
 
