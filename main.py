@@ -24,12 +24,16 @@ from dataloader.dataloader import DataLoader
 from model.graph_construction import get_triplets, format_code_map
 from model.model import OurModel
 from model.optimizer_scheduler import OPTIMIZERS, SCHEDULERS
+from model.criterion import init_criterion
+
+from metrics.metrics import init_metrics
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 logger = logging.getLogger()
 
 
 def seed_everything(seed: int):
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -70,33 +74,25 @@ def load_all(raw_data_path: str, save_data_path: str, graph_construction_path: s
     }
 
 
-def task_configuring_model(task, prescriptions):
+def task_configuring_model(args, prescriptions):
+
+    task = args.task
+    CRITERION = init_criterion(args)
+    criterion = [CRITERION['contrastive']]
 
     if task == 'mortality_prediction' or task == 'readmission_prediction':
         out_dim = 1
-        criterion = F.binary_cross_entropy_with_logits
+        criterion.append(CRITERION['binary_entropy'])
 
     elif task == 'drug_recommendation':
         out_dim = len(prescriptions)
-        criterion = F.binary_cross_entropy_with_logits
+        criterion.append(CRITERION['binary_entropy'])
 
     elif task == 'los_prediction':
         out_dim = 10
-        criterion = F.cross_entropy
+        criterion.append(CRITERION['entropy'])
 
     return out_dim, criterion
-
-
-def single_validate(model, device, val_loader, criterion):
-
-    model.eval()
-
-    for idx, data in enumerate(val_loader):
-        data = data.to(device)
-
-        with torch.no_grad():
-
-            out = model()
 
 
 def main(args):
@@ -129,7 +125,6 @@ def main(args):
                                       'visit_thresh': args.visit_thresh
                                   })
     logger.info('Dataset preprocessing complete')
-
     '''
     # count = 0
     # length = []
@@ -184,18 +179,19 @@ def main(args):
                                        triplet_method=args.triplet_method,
                                        code_pad_dim=args.pad_dim,
                                        visit_pad_dim=args.visit_thresh)
-    logger.info('Dataset ready')
+
+    val_dataset = MIMICIVBaseDataset(patients=val_patients,
+                                     task=args.task,
+                                     nodes=nodes,
+                                     triplets=triplets,
+                                     diagnoses_map=diagnoses_maps,
+                                     procedures_map=procedures_maps,
+                                     prescriptions_map=prescriptions_maps,
+                                     nodes_in_visits=nodes_in_visits,
+                                     triplet_method=args.triplet_method,
+                                     code_pad_dim=args.pad_dim,
+                                     visit_pad_dim=args.visit_thresh)
     '''
-    val_dataset = MIMICIVBaseDataset(dataset=val_dataset,
-                                       task=args.task,
-                                    #    graph=graph,
-                                       nodes=nodes,
-                                       triplets=triplets,
-                                       diagnoses_map=diagnoses_maps,
-                                       procedures_map=procedures_maps,
-                                       prescriptions_map=prescriptions_maps,
-                                       nodes_in_visits=nodes_in_visits,
-                                       pad_dim=args.pad_dim)
     test_dataset = MIMICIVBaseDataset(dataset=test_dataset,
                                        task=args.task,
                                     #    graph=graph,
@@ -207,10 +203,13 @@ def main(args):
                                        nodes_in_visits=nodes_in_visits,
                                        pad_dim=args.pad_dim)
     '''
+    logger.info('Dataset ready')
 
-    train_loader = DataLoader(dataset=train_dataset, task=args.task, batch_size=args.batch_size, shuffle=True)
+    train_loader = DataLoader(dataset=train_dataset, task=args.task, batch_size=args.train_batch_size, shuffle=True)
+    val_loader = DataLoader(dataset=val_dataset, task=args.task, batch_size=args.val_batch_size, shuffle=False)
+    logger.info('DataLoader ready')
 
-    out_dim, criterion = task_configuring_model(args.task, prescriptions_maps[0])
+    out_dim, criterion = task_configuring_model(args, prescriptions_maps[0])
 
     model = OurModel(device=device,
                      num_nodes=len(nodes),
@@ -224,7 +223,6 @@ def main(args):
                      proto_hidden_dim=args.proto_hidden_dim,
                      proto_out_dim=args.proto_out_dim,
                      time_trans_hidden_dim=args.time_trans_hidden_dim,
-                     time_trans_out_dim=args.time_trans_out_dim,
                      out_dim=out_dim,
                      gnn_layer=args.gnn_layer,
                      proto_num=args.proto_num,
@@ -234,8 +232,9 @@ def main(args):
                      set_decoder_depth=args.set_decoder_depth,
                      set_trans_out_num=args.set_trans_out_num,
                      proto_head_num=args.proto_head_num,
-                     proto_depth=args.proto_depth)
-
+                     proto_depth=args.proto_depth,
+                     time_head_num=args.time_head_num,
+                     time_depth=args.time_depth)
     model.to(device)
 
     optimizer = OPTIMIZERS[args.optimizer](model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -245,13 +244,24 @@ def main(args):
 
     for epoch_idx in range(args.num_epochs):
         # Train
-        single_train(model, train_loader, epoch_idx, global_iter_idx, criterion, optimizer, writer=writer)
+        single_train(model,
+                     train_loader,
+                     epoch_idx,
+                     global_iter_idx,
+                     criterion,
+                     args.contrastive_loss_factor,
+                     optimizer,
+                     writer=writer)
 
         # Validate
-        # if epoch_idx % args.val_freq == 0:
-        #     single_validate()
-
-    return
+        if epoch_idx % args.val_freq == 0:
+            METRICS = init_metrics(args)
+            single_validate(model,
+                            args.task,
+                            val_loader,
+                            global_iter_idx,
+                            metrics=[METRICS[metric] for metric in args.metrics],
+                            writer=writer)
 
 
 def single_train(model,
@@ -259,6 +269,7 @@ def single_train(model,
                  epoch_idx,
                  global_iter_idx,
                  criterion,
+                 ALPHA,
                  optimizer,
                  scheduler=None,
                  logging_freq=10,
@@ -268,13 +279,16 @@ def single_train(model,
 
     for idx, data in enumerate(dataloader):
         data = data.to(device)
-        
+
         optimizer.zero_grad()
 
-        out = model(data.node_ids, data.edge_index, data.edge_attr, data.visit_rel_times, data.visit_order)
+        out, prototypes = model(data.node_ids, data.edge_index, data.edge_attr, data.visit_rel_times, data.visit_order,
+                                data.attn_mask)
 
         labels = data.labels
-        loss = criterion(out, labels)
+        prototype_loss = criterion[0](prototypes)
+        prediction_loss = criterion[1](out, labels)
+        loss = prediction_loss + ALPHA * prototype_loss
         loss.backward()
         optimizer.step()
 
@@ -289,6 +303,39 @@ def single_train(model,
 
     if scheduler is not None:
         scheduler.step()
+
+
+def single_validate(model, task, dataloader, global_iter_idx, metrics=[], writer=None):
+
+    model.eval()
+    prob_all = []
+    target_all = []
+
+    for _, data in enumerate(tqdm(dataloader)):
+        data = data.to(device)
+
+        with torch.no_grad():
+            out, _ = model(data.node_ids, data.edge_index, data.edge_attr, data.visit_rel_times, data.visit_order,
+                           data.attn_mask)
+
+            if task == 'los_prediction':
+                probability = F.softmax(out, dim=-1)
+            else:
+                probability = torch.sigmoid(out)
+
+            labels = data.labels    # (B,L)
+
+            prob_all.append(probability.cpu())
+            target_all.append(labels.cpu())
+            
+    prob_all = np.concatenate(prob_all, axis=0)     # (N_patients,L)
+    target_all = np.concatenate(target_all, axis=0)
+
+    for metric in metrics:
+        score = metric.calculate(prob_all, target_all)
+        metric.log(score, logger, writer=writer, global_iter=global_iter_idx, name_prefix='val/')
+
+    return prob_all, target_all
 
 
 if __name__ == '__main__':
