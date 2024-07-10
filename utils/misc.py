@@ -15,7 +15,7 @@ def init_logger(args):
 
     logging.basicConfig(level=logging.INFO, handlers=[console_handler])
 
-    writer = tensorboardX.SummaryWriter(log_dir=osp.join(args.log_dir, 'tensorboard', args.start_time))
+    writer = tensorboardX.SummaryWriter(log_dir=osp.join(args.log_path, 'tensorboard', args.start_time))
 
     return writer
 
