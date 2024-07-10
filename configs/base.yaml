@@ -13,15 +13,20 @@ pad_dim: 60
 train_proportion: 0.8
 val_proportion: 0.1
 test_proportion: 0.1
-batch_size: 3
+train_batch_size: 3
+val_batch_size: 3
 num_epochs: 50
 val_freq: 5
+contrastive_loss_margin: 10
+contrastive_loss_factor: 1
+metrics:
+  - AUPRC
 
 # KG Configurations
 triplet_method: co-occurrence
 
 # Model Configurations
-start_embed_dim: 8
+start_embed_dim: 128
 gnn_layer: 2
 gnn_hidden_dim: 128
 
@@ -32,15 +37,16 @@ set_trans_hidden_dim: 128
 set_trans_out_dim: 128
 set_trans_out_num: 1
 
-proto_num: 5
+proto_num: 16
 proto_head_num: 4
 proto_depth: 1
 proto_hidden_dim: 128
 proto_out_dim: 128
 
 max_week_num: 630
+time_head_num: 4
+time_depth: 2
 time_trans_hidden_dim: 128
-time_trans_out_dim: 64
 
 optimizer: Adam
 lr: 0.00001
@@ -50,4 +56,5 @@ weight_decay: 0.00001
 raw_data_path: /home/engs2635/Desktop/caizi/raw_data
 save_data_path: /home/engs2635/Desktop/caizi/CHI/data/mimiciv
 graph_construction_path: /home/engs2635/Desktop/caizi/graph_construction
-log_dir: /home/engs2635/Desktop/caizi/CHI/logs
+log_path: /home/engs2635/Desktop/caizi/CHI/logs
+# ckpt_path: /home/engs2635/Desktop/caizi/CHI/checkpoints
