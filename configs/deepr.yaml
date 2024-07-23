@@ -1,5 +1,5 @@
 dataset: mimiciv
-task: readmission_prediction
+task: mortality_prediction
 seed: 0
 
 age_thresh_low: 18
@@ -17,54 +17,33 @@ test_batch_size: 3
 num_epochs: 100
 val_freq: 5
 logging_freq: 200
+
 triplet_method: co-occurrence
 
 model:
-  name: OurModel
-  model_type: base
+  name: Deepr
+  model_type: baseline
   args:
-    start_embed_dim: 128
-    gnn_layer: 1
-    gnn_hidden_dim: 128
-
-    set_head_num: 2
-    set_encoder_depth: 1
-    set_decoder_depth: 1
-    set_trans_hidden_dim: 128
-    set_trans_out_dim: 128
-    set_trans_out_num: 1
-
-    proto_num: 16
-    proto_head_num: 4
-    proto_depth: 1
-    proto_hidden_dim: 128
-    proto_out_dim: 128
-
     max_weeks_between: 630
-    time_head_num: 4
-    time_depth: 1
-    time_trans_hidden_dim: 128
+    start_embed_dim: 128
+    hidden_dim: 128
+    window_size: 1
 
 optimizer:
   name: Adam
   args:
-    lr: 0.00001
-    weight_decay: 0.00001
+    lr: 0.0005
+    weight_decay: 0.0001
 
 scheduler:
-  # name: StepLR
-  # args:
-  #   step_size: 10
-  #   gamma: 0.00001
+  name: StepLR
+  args:
+    step_size: 20
+    gamma: 0.0001
 
 criterion:
-  contrastive:
-    margin: 10
   binary_entropy:
     reduction: mean
-  # focal:
-  #   alpha: 0.2
-  #   gamma: 2
 
 metrics:
   - AUROC
