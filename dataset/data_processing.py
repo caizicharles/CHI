@@ -115,34 +115,20 @@ def filter_dataset(patients: dict,
             continue
 
         for visit in patient:
-            num_codes = 0
-            num_codes += len(visit.get_code_list('diagnoses_icd'))
-            num_codes += len(visit.get_code_list('procedures_icd'))
-            num_codes += len(visit.get_code_list('prescriptions'))
+            num_diagnoses = len(visit.get_code_list('diagnoses_icd'))
+            num_procedures = len(visit.get_code_list('procedures_icd'))
+            num_prescriptions = len(visit.get_code_list('prescriptions'))
+            num_codes = num_diagnoses + num_procedures + num_prescriptions
+
+            if num_diagnoses == 0 or num_procedures == 0 or num_prescriptions == 0:
+                del filtered_patients[id]
+                break
 
             if num_codes > code_thresh:
                 del filtered_patients[id]
                 break
 
     return filtered_patients
-
-
-# def set_dataset_task(dataset, task: str):
-
-#     assert task in ['mortality_prediction', 'readmission_prediction', 'los_prediction', 'drug_recommendation'],\
-#     'Task is invalid.'
-
-#     if dataset.dataset_name == 'MIMIC4Dataset':
-#         if task == 'mortality_prediction':
-#             tasked_dataset = dataset.set_task(pytasks.mortality_prediction_mimic4_fn)
-#         elif task == 'readmission_prediction':
-#             tasked_dataset = dataset.set_task(pytasks.readmission_prediction_mimic4_fn)
-#         elif task == 'los_prediction':
-#             tasked_dataset = dataset.set_task(pytasks.length_of_stay_prediction_mimic4_fn)
-#         elif task == 'drug_recommendation':
-#             tasked_dataset = dataset.set_task(pytasks.drug_recommendation_mimic4_fn)
-
-#     return tasked_dataset
 
 
 def get_dataset_table_stat(dataset):

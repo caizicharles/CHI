@@ -9,7 +9,7 @@ from openai import OpenAI
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from utils import *
+from utils.utils import *
 
 
 def generate_graph(nodes: list, triplets: list, triplet_method: str):
@@ -101,6 +101,7 @@ def get_triplets(triplet_method: str,
 
         co_occurrence_idx = np.where(co_occurrence_freq >= co_threshold)
         freq = co_occurrence_freq[co_occurrence_idx[0], co_occurrence_idx[1]]
+        
         '''
         # Row Normalization
         for row in co_occurrence_freq:

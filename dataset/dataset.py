@@ -54,7 +54,8 @@ class MIMICIVBaseDataset(data.Dataset):
                 self.dataset = self.construct_dataset(dataset=self.dataset,
                                                       nodes=nodes,
                                                       triplets=triplets,
-                                                      triplet_method=triplet_method)
+                                                      triplet_method=triplet_method,
+                                                      visit_pad_dim=visit_pad_dim)
                 # save_with_pickle(self.dataset, '/home/engs2635/Desktop/caizi/CHI/data/mimiciv', 'ready_mimiciv.pickle')
 
     @property
@@ -93,40 +94,18 @@ class MIMICIVBaseDataset(data.Dataset):
         elif table == 'prescriptions':
             return self.prescriptions_map[0][code]
 
-    def pad_dataset(self, dataset: list, code_pad_dim: int, visit_pad_dim: int):
-
-        for patient in dataset:
-            visit_codes = patient['x'].copy()
-
-            for idx, codes in enumerate(visit_codes):
-                if len(codes) < code_pad_dim:
-                    pad_length = code_pad_dim - len(codes)
-                    visit_codes[idx] = codes + [self.PAD_NAME] * pad_length
-
-                elif len(codes) > code_pad_dim:
-                    raise ValueError('code_pad_dim must exceed max code length')
-
-            if len(visit_codes) < visit_pad_dim:
-                pad_length = visit_pad_dim - len(visit_codes)
-
-                for _ in range(pad_length):
-                    visit_codes.append([self.PAD_NAME] * code_pad_dim)
-
-            elif len(visit_codes) > visit_pad_dim:
-                raise ValueError('visit_pad_dim must exceed max visit num')
-
-            patient['x'] = visit_codes
-
-        return dataset
-
     def mortality_prediction_fn(self, patient):
 
         patient_input = {
             'patient_id': None,
             'visit_ids': [],
             'node_ids': None,
+            'edge_ids': None,
             'visit_encounters': [],
             'visit_discharges': [],
+            'visit_node': None,
+            'edge_names': [],
+            'ehr_nodes': [],
             'padding_mask': [],
             'x': [],
             'y': None,
@@ -139,17 +118,17 @@ class MIMICIVBaseDataset(data.Dataset):
             patient_input['visit_encounters'].append(visit.encounter_time)
             patient_input['visit_discharges'].append(visit.discharge_time)
             codes = self.nodes_in_visits[visit.visit_id]
-            # patient_input['visit_x_map'].append([i]*len(codes))
             patient_input['x'].append(codes)
+
+            edges = itertools.permutations(codes, 2)
+            edges = [list(pair) for pair in edges]
+            patient_input['edge_names'].append(edges)
 
             if i == len(patient) - 1:
                 if visit.discharge_status not in [0, 1]:
                     patient_input['y'] = 0.
                 else:
                     patient_input['y'] = float(visit.discharge_status)
-
-        # patient_input['visit_x_map'] = [val for sub in patient_input['visit_x_map'] for val in sub]
-        # patient_input['x'] = [val for sub in patient_input['x'] for val in sub]
 
         return patient_input
 
@@ -158,26 +137,30 @@ class MIMICIVBaseDataset(data.Dataset):
         patient_input = {
             'patient_id': None,
             'visit_ids': [],
-            #  'visit_x_map': [],
+            'node_ids': None,
+            'edge_ids': None,
+            'visit_encounters': [],
+            'visit_discharges': [],
+            'visit_node': None,
+            'ehr_nodes': [],
+            'padding_mask': [],
             'x': [],
-            'y': None
+            'y': None,
         }
 
         patient_input['patient_id'] = patient.patient_id
 
         for (i, visit) in enumerate(patient):
             patient_input['visit_ids'].append(visit.visit_id)
+            patient_input['visit_encounters'].append(visit.encounter_time)
+            patient_input['visit_discharges'].append(visit.discharge_time)
             codes = self.nodes_in_visits[visit.visit_id]
-            # patient_input['visit_x_map'].append([i]*len(codes))
             patient_input['x'].append(codes)
 
             if i == len(patient) - 1:
                 time_diff = (visit.encounter_time - patient[i - 1].encounter_time).days
-                readmission_label = 1 if time_diff < time_window else 0
+                readmission_label = 1. if time_diff < time_window else 0.
                 patient_input['y'] = readmission_label
-
-        # patient_input['visit_x_map'] = [val for sub in patient_input['visit_x_map'] for val in sub]
-        # patient_input['x'] = [val for sub in patient_input['x'] for val in sub]
 
         return patient_input
 
@@ -199,6 +182,55 @@ class MIMICIVBaseDataset(data.Dataset):
 
         for patient in patients.values():
             dataset.append(task_fn(patient))
+
+        return dataset
+
+    def pad_dataset(self, dataset: list, code_pad_dim: int, visit_pad_dim: int):
+
+        for patient in dataset:
+            patient_codes = patient['x'].copy()
+            patient_edges = patient['edge_names'].copy()
+
+            # code padding
+            for idx, codes in enumerate(patient_codes):
+                if len(codes) < code_pad_dim:
+                    pad_length = code_pad_dim - len(codes)
+                    patient_codes[idx] = codes + [self.PAD_NAME] * pad_length
+
+                elif len(codes) > code_pad_dim:
+                    raise ValueError('code_pad_dim must exceed max code length')
+
+            if len(patient_codes) < visit_pad_dim:
+                pad_length = visit_pad_dim - len(patient_codes)
+
+                for _ in range(pad_length):
+                    patient_codes.append([self.PAD_NAME] * code_pad_dim)
+
+            elif len(patient_codes) > visit_pad_dim:
+                raise ValueError('visit_pad_dim must exceed max visit num')
+            
+            # edge padding
+            edge_pad_dim = code_pad_dim**2
+
+            for idx, edges in enumerate(patient_edges):
+                if len(edges) < edge_pad_dim:
+                    pad_length = edge_pad_dim - len(edges)
+                    patient_edges[idx] = edges + [self.PAD_NAME] * pad_length
+
+                elif len(edges) > edge_pad_dim:
+                    raise ValueError('edge_pad_dim must exceed max code length')
+                
+            if len(patient_edges) < visit_pad_dim:
+                pad_length = visit_pad_dim - len(patient_edges)
+
+                for _ in range(pad_length):
+                    patient_edges.append([self.PAD_NAME] * edge_pad_dim)
+
+            elif len(patient_edges) > visit_pad_dim:
+                raise ValueError('visit_pad_dim must exceed max visit num')
+
+            patient['x'] = patient_codes
+            patient['edge_names'] = patient_edges
 
         return dataset
 
@@ -226,36 +258,62 @@ class MIMICIVBaseDataset(data.Dataset):
 
         return edges, edge_indices, edge_loc
 
-    def construct_dataset(self, dataset, nodes, triplets, triplet_method):
+    def construct_dataset(self, dataset, nodes, triplets, triplet_method, visit_pad_dim):
 
         nodes = np.array(nodes) if type(nodes) != np.ndarray else nodes
         triplets = np.array(triplets) if type(triplets) != np.ndarray else triplets
+        src_dst = triplets[:, [1, -1]]
 
-        for patient in dataset:
-            # node_ids and padding_mask
-            visit_codes = patient['x']
+        for patient in tqdm(dataset):
+            # node_ids, edge_ids, and padding_mask
+            patient_codes = patient['x']
+            patient_edges = patient['edge_names']
             node_ids = []
+            edge_ids = []
             padding_mask = []
 
-            for codes in visit_codes:
-                single_visit_ids = []
+            for codes in patient_codes:
+                single_visit_node_ids = []
                 single_visit_mask = []
 
                 for code in codes:
                     if code == self.PAD_NAME:
-                        single_visit_ids.append(0)
+                        single_visit_node_ids.append(0)
                         single_visit_mask.append(True)
                     else:
-                        single_visit_ids.append(np.where(nodes == code)[0][0] + 1)
+                        single_visit_node_ids.append(np.where(nodes == code)[0][0] + 1)
                         single_visit_mask.append(False)
 
-                node_ids.append(single_visit_ids)
+                node_ids.append(single_visit_node_ids)
                 padding_mask.append(single_visit_mask)
 
+            for edges in patient_edges:
+                single_visit_edge_ids = []
+
+                for edge in edges:
+                    if edge == self.PAD_NAME:
+                        single_visit_edge_ids.append(0)
+                    else:
+                        if edge in src_dst:
+                            single_visit_edge_ids.append(np.where(src_dst == edge)[0][0] + 1)
+                        else:
+                            single_visit_edge_ids.append(0)
+
+                edge_ids.append(single_visit_edge_ids)
+
             node_ids = torch.tensor(node_ids)
-            patient['node_ids'] = node_ids
             padding_mask = torch.tensor(padding_mask)
+            edge_ids = torch.tensor(edge_ids)
+
+            patient['node_ids'] = node_ids
             patient['padding_mask'] = padding_mask
+            patient['edge_ids'] = edge_ids
+
+            # visit_node
+            visit_node = torch.zeros(visit_pad_dim, len(nodes)+1)
+            for i in range(node_ids.size(0)):
+                visit_node[i, node_ids[i]] = 1
+            patient['visit_node'] = visit_node
 
             # visit_rel_times and visit_order
             encounters = patient['visit_encounters']
@@ -275,15 +333,14 @@ class MIMICIVBaseDataset(data.Dataset):
                 hist_time = dis
 
             visit_rel_times = torch.tensor(visit_rel_times)
-            pad = torch.zeros(len(visit_codes) - len(visit_rel_times))
+            pad = torch.zeros(len(patient_codes) - len(visit_rel_times))
             visit_rel_times = torch.cat((visit_rel_times, pad), dim=0).to(torch.int)
+            visit_order = torch.arange(len(patient_codes), dtype=int)
             patient['visit_rel_times'] = visit_rel_times
-            visit_order = torch.arange(len(visit_codes), dtype=int)
             patient['visit_order'] = visit_order
 
         src_list = []
         dst_list = []
-        src_dst = triplets[:, [1, -1]]
 
         # edge_attr
         if triplet_method == 'co-occurrence':
