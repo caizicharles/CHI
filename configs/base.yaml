@@ -1,5 +1,5 @@
 dataset: mimiciv
-task: readmission_prediction
+task: mortality_prediction
 seed: 0
 
 age_thresh_low: 18
