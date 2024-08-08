@@ -1,0 +1,17 @@
+dataset: mimiciv
+seed: 0
+
+dataset_filtering:
+  args:
+    age_thresh_low: 18
+    age_thresh_high: 80
+    code_thresh: 60
+    visit_thresh: 15
+
+triplet_method: 
+  name: co-occurrence
+  args:
+    threshold: 100
+
+raw_data_path: /home/engs2635/Desktop/caizi/raw_data
+processed_data_path: /home/engs2635/Desktop/caizi/CHI/data

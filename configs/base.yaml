@@ -2,11 +2,9 @@ dataset: mimiciv
 task: mortality_prediction
 seed: 0
 
-age_thresh_low: 18
-age_thresh_high: 80
-code_freq_filter: 60
+triplet_method: co-occurrence
+code_thresh: 60
 visit_thresh: 15
-pad_dim: 60
 
 train_proportion: 0.8
 val_proportion: 0.1
@@ -16,8 +14,7 @@ val_batch_size: 3
 test_batch_size: 3
 num_epochs: 100
 val_freq: 5
-logging_freq: 200
-triplet_method: co-occurrence
+logging_freq: 20
 
 model:
   name: OurModel
@@ -58,13 +55,13 @@ scheduler:
   #   gamma: 0.00001
 
 criterion:
-  contrastive:
-    margin: 10
-  binary_entropy:
-    reduction: mean
-  # focal:
-  #   alpha: 0.2
-  #   gamma: 2
+  # contrastive:
+  #   margin: 10
+  # binary_entropy:
+  #   reduction: mean
+  focal:
+    alpha: 0.2
+    gamma: 2
 
 metrics:
   - AUROC
@@ -72,6 +69,5 @@ metrics:
   - AP
 
 raw_data_path: /home/engs2635/Desktop/caizi/raw_data
-save_data_path: /home/engs2635/Desktop/caizi/CHI/data/mimiciv
-graph_construction_path: /home/engs2635/Desktop/caizi/graph_construction
+processed_data_path: /home/engs2635/Desktop/caizi/CHI/data/mimiciv
 log_path: /home/engs2635/Desktop/caizi/CHI/logs
