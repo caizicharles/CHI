@@ -33,7 +33,7 @@ class GRU(nn.Module):
                           batch_first=True)
         self.head = nn.Linear(self.visit_thresh * self.hidden_dim, self.out_dim)
 
-    def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask):
+    def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask, **kwargs):
 
         x = self.node_embed(self.full_node_ids)
         B, V, N = node_ids.shape
@@ -83,7 +83,7 @@ class Transformer(nn.Module):
                                        batch_first=True), self.decoder_depth)
         self.head = nn.Linear(self.visit_thresh * self.input_dim, self.out_dim)
 
-    def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask):
+    def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask, **kwargs):
 
         B, V, N = node_ids.shape
         x = self.node_embed(self.full_node_ids)
@@ -131,7 +131,7 @@ class Deepr(nn.Module):
 
         self.head = nn.Linear(self.hidden_dim, self.out_dim)
 
-    def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask):
+    def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask, **kwargs):
 
         B, V, N = node_ids.shape
         x = self.node_embed(self.full_node_ids)
@@ -197,7 +197,7 @@ class AdaCare(nn.Module):
         self.relu = nn.ReLU()
         self.tanh = nn.Tanh()
 
-    def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask):
+    def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask, **kwargs):
 
         B, V, N = node_ids.shape
         input = self.node_embed(self.full_node_ids)
@@ -331,7 +331,7 @@ class StageNet(nn.Module):
         out = torch.cat([h_out, f_master_gate[..., 0], i_master_gate[..., 0]], 1)
         return out, c_out, h_out
 
-    def forward(self, node_ids, edge_idx, edge_attr, time, visit_order, attn_mask):
+    def forward(self, node_ids, edge_idx, edge_attr, time, visit_order, attn_mask, **kwargs):
 
         B, V, N = node_ids.shape
         input = self.node_embed(self.full_node_ids)
@@ -401,15 +401,16 @@ class GraphCare(nn.Module):
         super().__init__()
 
         self.gnn = args['gnn']
+        self.gnn_layer = args['gnn_layer']
         self.embedding_dim = args['start_embed_dim']
         self.decay_rate = args['decay_rate']
         self.patient_mode = args['patient_mode']
-        self.use_alpha = True if args['use_alpha'] == 'True' else False
-        self.use_beta = True if args['use_beta'] == 'True' else False
-        self.edge_attn = True if args['edge_attn'] == 'True' else False
+        self.use_alpha = args['use_alpha']
+        self.use_beta = args['use_beta']
+        self.edge_attn = args['edge_attn']
         self.num_nodes = args['num_nodes']
         self.num_edges = args['num_edges']
-        self.max_visit = args['max_visit']
+        self.max_visit = args['visit_thresh']
         self.hidden_dim = args['hidden_dim']
         self.out_channels = args['out_dim']
         self.drop_rate = 0.
@@ -421,10 +422,10 @@ class GraphCare(nn.Module):
         self.lambda_j = torch.exp(self.decay_rate * (self.max_visit - j)).unsqueeze(0).reshape(1, self.max_visit,
                                                                                                1).float()
 
-        self.node_emb = nn.Embedding(self.num_nodes, self.embedding_dim)
-        self.edge_emb = nn.Embedding(self.num_edges, self.embedding_dim)
+        self.node_emb = nn.Embedding(self.num_nodes + 1, self.embedding_dim, padding_idx=0)
+        self.edge_emb = nn.Embedding(self.num_edges + 1, self.embedding_dim, padding_idx=0)
         # if node_emb is None:
-            # self.node_emb = nn.Embedding(self.num_nodes, self.embedding_dim)
+        # self.node_emb = nn.Embedding(self.num_nodes, self.embedding_dim)
         # else:
         #     self.node_emb = nn.Embedding.from_pretrained(self.node_emb, freeze=freeze)
 
@@ -447,19 +448,19 @@ class GraphCare(nn.Module):
 
         for layer in range(1, self.gnn_layer + 1):
             if self.use_alpha:
-                self.alpha_attn[str(layer)] = nn.Linear(self.num_nodes, self.num_nodes)
+                self.alpha_attn[str(layer)] = nn.Linear(self.num_nodes + 1, self.num_nodes + 1)
 
-                if attn_init is not None:
-                    attn_init = attn_init.float()  # Convert attn_init to float
+                if self.attn_init is not None:
+                    self.attn_init = self.attn_init.float()  # Convert attn_init to float
                     attn_init_matrix = torch.eye(
-                        self.num_nodes).float() * attn_init  # Multiply the identity matrix by attn_init
+                        self.num_nodes).float() * self.attn_init  # Multiply the identity matrix by attn_init
                     self.alpha_attn[str(layer)].weight.data.copy_(
                         attn_init_matrix)  # Copy the modified attn_init_matrix to the weights
 
                 else:
                     nn.init.xavier_normal_(self.alpha_attn[str(layer)].weight)
             if self.use_beta:
-                self.beta_attn[str(layer)] = nn.Linear(self.num_nodes, 1)
+                self.beta_attn[str(layer)] = nn.Linear(self.num_nodes + 1, 1)
                 nn.init.xavier_normal_(self.beta_attn[str(layer)].weight)
             if self.gnn == "BAT":
                 self.conv[str(layer)] = BiAttentionGNNConv(nn.Linear(self.hidden_dim, self.hidden_dim),
@@ -485,25 +486,23 @@ class GraphCare(nn.Module):
 
     def forward(self,
                 node_ids,
-                edge_ids,
-                edge_index,
+                edge_idx,
                 edge_attr,
                 visit_times,
                 visit_order,
-                visit_node,
-                ehr_nodes,
-                batch,
                 attn_mask,
+                in_drop=False,
                 store_attn=False,
-                in_drop=False):
+                **kwargs):
 
-        # node_ids, rel_ids, edge_index, batch, visit_node, ehr_nodes, store_attn=False, in_drop=False
-        # node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask
-        ## node_ids, edge_ids, edge_index, edge_attr, visit_times, visit_order, visit_node, ehr_nodes, batch, attn_mask, store_attn=False, in_drop=False
-
-        # batch: (node_num,) assigns node to batch
-        # visit_node: (B,V,node_num) multihot tensor indicating nodes in all visits
-        # ehr_nodes: (B,) multihot tensor indicating whether code belongs to patient
+        node_ids = kwargs['cat_node_ids']
+        edge_ids = kwargs['cat_edge_ids']
+        edge_index = kwargs['cat_edge_index']
+        edge_attr = kwargs['cat_edge_attr']
+        visit_node = kwargs['visit_nodes']
+        ehr_nodes = kwargs['ehr_nodes']
+        batch = kwargs['batch']
+        batch_patient = kwargs['batch_patient']
 
         if in_drop and self.drop_rate > 0:
             edge_count = edge_index.size(1)
@@ -512,10 +511,10 @@ class GraphCare(nn.Module):
             edge_index = edge_index[:,
                                     [i for i in range(edge_count) if i not in indices_to_remove]].to(edge_index.device)
             edge_ids = torch.tensor([rel_id for i, rel_id in enumerate(edge_ids) if i not in indices_to_remove],
-                                   device=edge_ids.device)
+                                    device=edge_ids.device)
 
-        x = self.node_emb(node_ids).float()             # (B,V,node_num,D)
-        edge_attr = self.edge_emb(edge_ids).float()     # (B,V,edge_num,D)
+        x = self.node_emb(node_ids).float()
+        edge_attr = self.edge_emb(edge_ids).float()
 
         x = self.lin(x)
         edge_attr = self.lin(edge_attr)
@@ -526,7 +525,7 @@ class GraphCare(nn.Module):
             self.attention_weights = []
             self.edge_weights = []
 
-        for layer in range(1, self.layers + 1):
+        for layer in range(1, self.gnn_layer + 1):
             if self.use_alpha:
                 # alpha = masked_softmax((self.leakyrelu(self.alpha_attn[str(layer)](visit_node.float()))), mask=visit_node>1, dim=1)
                 alpha = torch.softmax((self.alpha_attn[str(layer)](visit_node.float())),
@@ -546,14 +545,12 @@ class GraphCare(nn.Module):
                 attn = torch.ones((batch.max().item() + 1, self.max_visit, self.num_nodes)).to(edge_index.device)
 
             attn = torch.sum(attn, dim=1)
-
             xj_node_ids = node_ids[edge_index[0]]
             xj_batch = batch[edge_index[0]]
             attn = attn[xj_batch, xj_node_ids].reshape(-1, 1)
 
             if self.gnn == "BAT":
-                x, w_rel = self.conv[str(layer)](x, edge_index, edge_attr, attn=attn)   # (,D)
-
+                x, w_rel = self.conv[str(layer)](x, edge_index, edge_attr, attn=attn)
             else:
                 x = self.conv[str(layer)](x, edge_index)
 
@@ -574,8 +571,13 @@ class GraphCare(nn.Module):
 
         if self.patient_mode == "joint" or self.patient_mode == "node":
             # patient node embedding through local (direct EHR) mean pooling
+            # x_node = torch.stack([
+            #     ehr_nodes[i].view(1, -1) @ self.node_emb.weight / torch.sum(ehr_nodes[i])
+            #     for i in range(batch.max().item() + 1)
+            # ])
             x_node = torch.stack([
-                ehr_nodes[i].view(1, -1) @ self.node_emb.weight / torch.sum(ehr_nodes[i])
+                visit_node[i].view(1, -1) @ self.node_emb.weight / torch.sum(visit_node[i])
+                if torch.sum(visit_node[i]) != 0 else torch.zeros(1, self.embedding_dim, device=edge_index.device)
                 for i in range(batch.max().item() + 1)
             ])
             x_node = self.lin(x_node).squeeze(1)
@@ -585,6 +587,9 @@ class GraphCare(nn.Module):
             # concatenate patient graph embedding and patient node embedding
             x_concat = torch.cat((x_graph, x_node), dim=1)
             x_concat = F.dropout(x_concat, p=self.dropout, training=self.training)
+
+            x_concat = global_mean_pool(x_concat, batch_patient)
+
             # MLP for prediction
             logits = self.MLP(x_concat)
 
@@ -599,7 +604,7 @@ class GraphCare(nn.Module):
         if store_attn:
             return logits, self.alpha_weights, self.beta_weights, self.attention_weights, self.edge_weights
         else:
-            return logits
+            return logits, None
 
 
 class OurModel(nn.Module):
@@ -680,15 +685,7 @@ class OurModel(nn.Module):
                                    mlp_hidden_dim=2 * time_trans_hidden_dim,
                                    mlp_output_dim=out_dim)
 
-    def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask):
-
-        # print(f'node id shape: {node_ids.shape}')
-        # print(f'edge idx shape: {edge_idx.shape}')
-        # print(f'edge attr shape: {edge_attr.shape}')
-
-        # full_edge_ids = torch.arange(self.num_edges)
-        # edge_embed = self.edge_embed(full_edge_ids)
-        # edge_embed = self.lin(edge_embed)
+    def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask, **kwargs):
 
         x = self.node_embed(self.full_node_ids)  # (node_num,D)
         # x = self.fc(x)

@@ -217,9 +217,11 @@ class BiAttentionGNNConv(MessagePassing):
 
 
 def masked_softmax(src: Tensor, mask: Tensor, dim: int = -1) -> Tensor:
+
     out = src.masked_fill(~mask, float('-inf'))
     out = torch.softmax(out, dim=dim)
     out = out.masked_fill(~mask, 0)
+
     return out + 1e-8  # Add small constant to avoid numerical issues
 
 
@@ -308,6 +310,7 @@ class MAB(nn.Module):
         self.fc_o = nn.Linear(dim_V, dim_V)
 
     def forward(self, Q, K, attn_mask=None):
+
         Q = self.fc_q(Q)
         K, V = self.fc_k(K), self.fc_v(K)
 
@@ -329,38 +332,12 @@ class MAB(nn.Module):
 
         scores = Q_.matmul(K_.transpose(-2, -1)) / math.sqrt(dim_split)
 
-        # if attn_mask is not None:
-        #     nq = Q_.size(-2)
-        #     bh = K_.size(0)
-        #     visit_attn_mask = attn_mask.all(dim=-1)
-        #     visit_attn_mask = visit_attn_mask.repeat(self.num_heads, 1)
-
-        #     if K.dim() == 3:
-        #         # visit_attn_mask (B, V) -> (BH, NQ, NK)
-
-        #         if Q.size(-2) == attn_mask.size(-1):
-        #             Q_mask = visit_attn_mask.unsqueeze(-1)
-        #             Q_mask = Q_mask.expand(bh, nq, nk)
-
-        #         score_mask = visit_attn_mask.expand(bh, )
-
-        #         visit_attn_mask = visit_attn_mask.unsqueeze(-2)
-        #         bh, nk = K_.size(0), K_.size(-2)
-        #         visit_attn_mask = visit_attn_mask.expand(bh, nq, nk)
-
-        #     elif K.dim() == 4:
-        #         # visit_attn_mask (B, V) -> (BH, V, NQ, NK)
-        #         visit_attn_mask = visit_attn_mask.unsqueeze(-1).unsqueeze(-1)
-        #         bh, v, nk = K_.size(0), K_.size(1), K_.size(-2)
-        #         visit_attn_mask = visit_attn_mask.expand(bh, v, nq, nk)
-
-        #     scores = scores.masked_fill(visit_attn_mask == True, float('-inf'))
-
         A = torch.softmax(scores, dim=-1)
         O = torch.cat((Q_ + A.matmul(V_)).split(Q.size(0), 0), dim=-1)
         O = O if getattr(self, 'ln0', None) is None else self.ln0(O)
         O = O + F.relu(self.fc_o(O))
         O = O if getattr(self, 'ln1', None) is None else self.ln1(O)
+
         return O
 
 
@@ -416,6 +393,7 @@ class PredictionHead(nn.Module):
         super().__init__()
 
         self.Q = nn.Parameter(torch.Tensor(1, 1, mlp_input_dim))
+        nn.init.xavier_uniform_(self.Q)
 
         self.attn = MAB(attn_hidden_dim, attn_hidden_dim, mlp_input_dim, head_num, ln=ln)
         self.mlp = nn.Linear(mlp_input_dim, mlp_output_dim)
@@ -438,7 +416,7 @@ class TimeTransformer(nn.Module):
     def forward(self, X, visit_x, embed, attn_mask=None):
         embed = embed.repeat(1, 1, 2)  # (B,V,2D)
         X = torch.cat((X, visit_x), dim=-1)  # (B,V,2D)
-
+        # TODO only + embed when input
         for _, block in enumerate(self.attn):
             X = block(X + embed, attn_mask)
         return X
