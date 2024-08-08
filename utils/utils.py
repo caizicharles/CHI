@@ -1,7 +1,7 @@
 import pickle
 import csv
-import re
 import os.path as osp
+from typing import List, Dict
 
 
 def save_with_pickle(file: object, save_path: str, file_name: str):
@@ -131,3 +131,14 @@ def StringtoList(input: list):
         # output.append(data)
 
     return output
+
+
+def format_code_map(input: List[Dict]) -> Dict:
+
+    code_to_name = {}
+    name_to_code = {}
+    for row in input:
+        code_to_name |= {row['code']: row['code_name']}
+        name_to_code |= {row['code_name']: row['code']}
+
+    return code_to_name, name_to_code

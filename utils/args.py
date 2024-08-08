@@ -21,10 +21,9 @@ def get_args():
 
     # Data Paths
     parser.add_argument('--raw_data_path', type=str, default='')
-    parser.add_argument('--save_data_path', type=str, default='')
+    parser.add_argument('--precessed_data_path', type=str, default='')
     parser.add_argument('--graph_construction_path', type=str, default='')
     parser.add_argument('--log_path', type=str, default='')
-    parser.add_argument('--ckpt_path', type=str, default='')
 
     # Config File
     config_parser = argparse.ArgumentParser(description='Algorithm Config', add_help=False)
@@ -40,12 +39,6 @@ def get_args():
     args = parser.parse_args(remaining)
 
     args.start_time = get_time_str()
-
-    if args.ckpt_path != '':
-        args.resume = True
-    assert args.train_proportion + args.val_proportion + args.test_proportion == 1., 'train-val-test split should sum to 1'
-    # if args.code_freq_filter != 0:
-    #     assert args.pad_dim >= args.code_freq_filter, 'Padding must exceed max number of codes'
 
     return args
 
