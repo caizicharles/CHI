@@ -6,7 +6,7 @@ pip install torch-geometric==2.3.0
 pip install pyhealth==1.1.2
 pip install scikit-learn==1.2.1
 pip install scipy
-pip install openai
+pip install transformers
 pip install PyYAML
 pip install tensorboardX
 
