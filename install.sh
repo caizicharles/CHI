@@ -7,6 +7,7 @@ pip install pyhealth==1.1.2
 pip install scikit-learn==1.2.1
 pip install scipy
 pip install transformers
+pip install openai
 pip install PyYAML
 pip install tensorboardX
 
