@@ -15,3 +15,4 @@ pip install tensorboardX
 pip install prettytable
 pip install tqdm
 pip install matplotlib
+pip install yapf
