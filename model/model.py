@@ -1,12 +1,13 @@
 import random
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from torch_geometric.nn import GINEConv, GATConv, GINConv, global_mean_pool
+from torch_geometric.nn import GATConv, GINConv, global_mean_pool
 
-from .modules import DataEmbedding, SetTransformer, PrototypeLearner, TimeTransformer, PredictionHead,\
-BiAttentionGNNConv, CausalConv1d, Recalibration, DeeprLayer, TemporalEmbedding
+from .modules import CodeTypeEmbedding, DataEmbedding, CompGCNConv, SetTransformer, ImportanceAttention,\
+BiAttentionGNNConv, CausalConv1d, Recalibration, DeeprLayer, TimeGapEmbedding
 
 
 class GRU(nn.Module):
@@ -22,31 +23,45 @@ class GRU(nn.Module):
         self.hidden_dim = args['hidden_dim']
         self.num_layers = args['layers']
         self.out_dim = args['out_dim']
+        node_embed = args['global_node_attr']
 
         self.full_node_ids = torch.arange(self.num_nodes + 1).to(device)
-        self.node_embed = nn.Embedding(self.num_nodes + 1, self.input_dim, padding_idx=0)
 
-        self.h_0 = nn.Parameter(torch.randn(self.num_layers, 1, self.hidden_dim)).to(device)
+        if node_embed is None:
+            self.node_embed = nn.Embedding(self.num_nodes + 1, self.input_dim, padding_idx=0)
+        else:
+            self.node_embed = nn.Embedding.from_pretrained(node_embed, freeze=False, padding_idx=0)
+
+        self.h_0 = nn.Parameter(torch.Tensor(self.num_layers, 1, self.hidden_dim))
+        nn.init.xavier_uniform_(self.h_0)
+
         self.gru = nn.GRU(input_size=self.visit_code_num * self.input_dim,
                           hidden_size=self.hidden_dim,
                           num_layers=self.num_layers,
                           batch_first=True)
-        self.head = nn.Linear(self.visit_thresh * self.hidden_dim, self.out_dim)
+
+        self.head = nn.Linear(self.hidden_dim, self.out_dim)
 
     def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask, **kwargs):
 
         x = self.node_embed(self.full_node_ids)
+
         B, V, N = node_ids.shape
         x = x.unsqueeze(0).unsqueeze(0).expand(B, V, -1, -1)  # (B,V,node_num,D)
         x = torch.gather(x, 2, node_ids.unsqueeze(-1).expand(-1, -1, -1, self.input_dim))
         x = x.reshape(B, V, N * self.input_dim)  # (B,V,N*D)
 
         x, h = self.gru(x, self.h_0.repeat(1, B, 1))  # (B,V,D), (layer_num,B,D)
-        x = x.reshape(B, V * self.hidden_dim)
+
+        visit_mask = attn_mask.all(dim=-1)
+        visit_mask = ~visit_mask
+        visit_mask = visit_mask.to(int)
+        mask = torch.sum(visit_mask, dim=-1) - 1
+        x = x[torch.arange(B), mask]  # (B,D)
 
         out = self.head(x)
 
-        return out, None
+        return {'logits': [out], 'prototypes': None, 'embeddings': None, 'scores': None}
 
 
 class Transformer(nn.Module):
@@ -65,9 +80,15 @@ class Transformer(nn.Module):
         self.encoder_depth = args['encoder_depth']
         self.decoder_depth = args['decoder_depth']
         self.out_dim = args['out_dim']
+        node_embed = args['global_node_attr']
+
         self.full_node_ids = torch.arange(self.num_nodes + 1).to(device)
 
-        self.node_embed = nn.Embedding(self.num_nodes + 1, self.input_dim, padding_idx=0)
+        if node_embed is None:
+            self.node_embed = nn.Embedding(self.num_nodes + 1, self.input_dim, padding_idx=0)
+        else:
+            self.node_embed = nn.Embedding.from_pretrained(node_embed, freeze=False, padding_idx=0)
+
         self.fc = nn.Linear(self.visit_code_num * self.start_embed_dim, self.input_dim)
         self.encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=self.visit_code_num * self.input_dim,
@@ -81,31 +102,35 @@ class Transformer(nn.Module):
                                        dim_feedforward=self.ff_dim,
                                        dropout=0.,
                                        batch_first=True), self.decoder_depth)
-        self.head = nn.Linear(self.visit_thresh * self.input_dim, self.out_dim)
+        self.head = nn.Linear(self.input_dim, self.out_dim)
 
     def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask, **kwargs):
 
         B, V, N = node_ids.shape
         x = self.node_embed(self.full_node_ids)
+
         x = x.unsqueeze(0).unsqueeze(0).expand(B, V, -1, -1)  # (B,V,node_num,D)
         x = torch.gather(x, 2, node_ids.unsqueeze(-1).expand(-1, -1, -1, self.input_dim))
         x = x.reshape(B, V, N * self.input_dim)  # (B,V,N*D)
 
         visit_mask = attn_mask.all(dim=-1)
-        # visit_mask = ~visit_mask
-        # mask = visit_mask.unsqueeze(1).unsqueeze(-1).repeat(1, self.head_num, 1, 1)  # (B,head_num,V,1)
-        # mask = mask.reshape(B * self.head_num, V, 1).float()
-        # mask = mask.matmul(mask.transpose(-1, -2))
-        # mask = mask.masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.))
 
         x = self.encoder(x, src_key_padding_mask=visit_mask)
         x = self.decoder(x, x, tgt_key_padding_mask=visit_mask)
+        x = self.fc(x)  # (B,V,D)
 
-        x = self.fc(x)
-        x = x.reshape(B, V * self.input_dim)
+        visit_mask = ~visit_mask
+        mask = visit_mask.to(int).unsqueeze(-1)
+        x = x * mask
+        x = x.sum(dim=1)  # (B,D)
+
+        count = mask.sum(dim=1)
+        count = count.clamp(min=1)
+        x = x / count  # (B,D)
+
         out = self.head(x)
 
-        return out, None
+        return {'logits': [out], 'prototypes': None, 'embeddings': None, 'scores': None}
 
 
 class Deepr(nn.Module):
@@ -122,10 +147,16 @@ class Deepr(nn.Module):
         self.hidden_dim = args['hidden_dim']
         self.window_size = args['window_size']
         self.out_dim = args['out_dim']
+        node_embed = args['global_node_attr']
 
         self.full_node_ids = torch.arange(self.num_nodes + 1).to(device)
-        self.node_embed = nn.Embedding(self.num_nodes + 1, self.start_embed_dim, padding_idx=0)
-        self.gap_time_embed = TemporalEmbedding(self.max_weeks_between, self.start_embed_dim)
+
+        if node_embed is None:
+            self.node_embed = nn.Embedding(self.num_nodes + 1, self.start_embed_dim, padding_idx=0)
+        else:
+            self.node_embed = nn.Embedding.from_pretrained(node_embed, freeze=False, padding_idx=0)
+
+        self.time_gap_embed = TimeGapEmbedding(self.start_embed_dim, device)
 
         self.layer = DeeprLayer(feature_size=self.start_embed_dim, window=self.window_size, hidden_size=self.hidden_dim)
 
@@ -135,24 +166,26 @@ class Deepr(nn.Module):
 
         B, V, N = node_ids.shape
         x = self.node_embed(self.full_node_ids)
+
         x = x.unsqueeze(0).unsqueeze(0).expand(B, V, -1, -1)  # (B,V,node_num,D)
         x = torch.gather(x, 2, node_ids.unsqueeze(-1).expand(-1, -1, -1, self.start_embed_dim))  # (B,V,N,D)
 
-        gap_embed = self.gap_time_embed(visit_times)
+        gap_embed = self.time_gap_embed(visit_times)
         first_row = gap_embed[:, 0, :]
         rest_rows = gap_embed[:, 1:, :]
         gap_embed = torch.cat((rest_rows, first_row.unsqueeze(1)), dim=1)
         gap_embed = gap_embed.unsqueeze(-2)
 
-        visit_mask = attn_mask.all(dim=-1)  # (B,V)
-        visit_mask = ~visit_mask
-
         x = torch.cat((x, gap_embed), dim=-2)
+
+        visit_mask = attn_mask.all(dim=-1)
+        visit_mask = ~visit_mask
+        visit_mask = visit_mask.unsqueeze(-1).unsqueeze(-1)
         x = self.layer(x, visit_mask.float())  # (B,D)
 
         out = self.head(x)
 
-        return out, None
+        return {'logits': [out], 'prototypes': None, 'embeddings': None, 'scores': None}
 
 
 class AdaCare(nn.Module):
@@ -172,10 +205,15 @@ class AdaCare(nn.Module):
         self.r_v = args['r_v']
         self.r_c = args['r_c']
         self.activation = args['activation']
+        node_embed = args['global_node_attr']
         self.dropout = 0.
 
         self.full_node_ids = torch.arange(self.num_nodes + 1).to(self.device)
-        self.node_embed = nn.Embedding(self.num_nodes + 1, self.input_dim, padding_idx=0)
+
+        if node_embed is None:
+            self.node_embed = nn.Embedding(self.num_nodes + 1, self.start_embed_dim, padding_idx=0)
+        else:
+            self.node_embed = nn.Embedding.from_pretrained(node_embed, freeze=False, padding_idx=0)
 
         self.nn_conv1 = CausalConv1d(self.visit_code_num * self.input_dim, self.kernel_num, self.kernel_size, 1, 1)
         self.nn_conv3 = CausalConv1d(self.visit_code_num * self.input_dim, self.kernel_num, self.kernel_size, 1, 3)
@@ -191,7 +229,7 @@ class AdaCare(nn.Module):
                                         use_c=True,
                                         activation=self.activation)
         self.rnn = nn.GRUCell(self.visit_code_num * self.input_dim + 3 * self.kernel_num, self.hidden_dim)
-        self.nn_output = nn.Linear(self.visit_thresh * self.hidden_dim, self.out_dim)
+        self.nn_output = nn.Linear(self.hidden_dim, self.out_dim)
         self.nn_dropout = nn.Dropout(self.dropout)
 
         self.relu = nn.ReLU()
@@ -231,12 +269,20 @@ class AdaCare(nn.Module):
             inputse_att.append(cur_inputatt)
 
         h = torch.stack(h).permute(1, 0, 2)
-        h_reshape = h.contiguous().view(B, V * self.hidden_dim)
+        h_reshape = h.contiguous().view(B * V, self.hidden_dim)
         if self.dropout > 0.0:
             h_reshape = self.nn_dropout(h_reshape)
         output = self.nn_output(h_reshape)
+        # output = self.sigmoid(output)
+        output = output.contiguous().view(B, V, self.out_dim)
 
-        return output, inputse_att
+        visit_mask = attn_mask.all(dim=-1)
+        visit_mask = ~visit_mask
+        visit_mask = visit_mask.to(int)
+        mask = torch.sum(visit_mask, dim=-1) - 1
+        output = output[torch.arange(B), mask]
+
+        return {'logits': [output], 'prototypes': None, 'embeddings': None, 'scores': None}
 
 
 class StageNet(nn.Module):
@@ -255,6 +301,7 @@ class StageNet(nn.Module):
         self.conv_size = args['conv_size']
         self.output_dim = args['out_dim']
         self.levels = args['levels']
+        node_embed = args['global_node_attr']
         self.dropconnect = 0.
         self.dropout = 0.
         self.dropres = 0.
@@ -263,7 +310,10 @@ class StageNet(nn.Module):
 
         self.full_node_ids = torch.arange(self.num_nodes + 1).to(self.device)
 
-        self.node_embed = nn.Embedding(self.num_nodes + 1, self.input_dim, padding_idx=0)
+        if node_embed is None:
+            self.node_embed = nn.Embedding(self.num_nodes + 1, self.start_embed_dim, padding_idx=0)
+        else:
+            self.node_embed = nn.Embedding.from_pretrained(node_embed, freeze=False, padding_idx=0)
 
         self.kernel = nn.Linear(int(self.input_dim * self.visit_code_num + 1),
                                 int(self.hidden_dim * 4 + self.levels * 2))
@@ -276,7 +326,7 @@ class StageNet(nn.Module):
         self.nn_scale = nn.Linear(int(self.hidden_dim), int(self.hidden_dim // 6))
         self.nn_rescale = nn.Linear(int(self.hidden_dim // 6), int(self.hidden_dim))
         self.nn_conv = nn.Conv1d(int(self.hidden_dim), int(self.conv_dim), int(self.conv_size), 1)
-        self.nn_output = nn.Linear(int(self.visit_thresh * self.conv_dim), int(self.output_dim))
+        self.nn_output = nn.Linear(int(self.conv_dim), int(self.output_dim))
 
         if self.dropconnect:
             self.nn_dropconnect = nn.Dropout(p=self.dropconnect)
@@ -331,7 +381,7 @@ class StageNet(nn.Module):
         out = torch.cat([h_out, f_master_gate[..., 0], i_master_gate[..., 0]], 1)
         return out, c_out, h_out
 
-    def forward(self, node_ids, edge_idx, edge_attr, time, visit_order, attn_mask, **kwargs):
+    def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask, **kwargs):
 
         B, V, N = node_ids.shape
         input = self.node_embed(self.full_node_ids)
@@ -351,7 +401,7 @@ class StageNet(nn.Module):
         origin_h = []
         distance = []
         for t in range(time_step):
-            out, c_out, h_out = self.step(input[:, t, :], c_out, h_out, time[:, t])
+            out, c_out, h_out = self.step(input[:, t, :], c_out, h_out, visit_times[:, t])
             cur_distance = 1 - torch.mean(out[..., self.hidden_dim:self.hidden_dim + self.levels], -1)
             cur_distance_in = torch.mean(out[..., self.hidden_dim + self.levels:], -1)
             origin_h.append(out[..., :self.hidden_dim])
@@ -382,17 +432,21 @@ class StageNet(nn.Module):
         if self.dropres > 0.0:
             origin_h = self.nn_dropres(origin_h)
         rnn_outputs = rnn_outputs + origin_h
-        # rnn_outputs = rnn_outputs.contiguous().view(-1, rnn_outputs.size(-1))
+        rnn_outputs = rnn_outputs.contiguous().view(-1, rnn_outputs.size(-1))
         if self.dropout > 0.0:
             rnn_outputs = self.nn_dropout(rnn_outputs)
 
         # Prediction
-        rnn_outputs = rnn_outputs.reshape(B, V * self.hidden_dim)
         output = self.nn_output(rnn_outputs)
-        # output = output.contiguous().view(B, time_step, self.output_dim)
-        # output = torch.sigmoid(output)
+        output = output.contiguous().view(B, time_step, self.output_dim)
 
-        return output, torch.stack(distance)
+        visit_mask = attn_mask.all(dim=-1)
+        visit_mask = ~visit_mask
+        visit_mask = visit_mask.to(int)
+        mask = torch.sum(visit_mask, dim=-1) - 1
+        output = output[torch.arange(B), mask]
+
+        return {'logits': [output], 'prototypes': None, 'embeddings': None, 'scores': None}
 
 
 class GraphCare(nn.Module):
@@ -401,7 +455,7 @@ class GraphCare(nn.Module):
         super().__init__()
 
         self.gnn = args['gnn']
-        self.gnn_layer = args['gnn_layer']
+        self.layer = args['layer']
         self.embedding_dim = args['start_embed_dim']
         self.decay_rate = args['decay_rate']
         self.patient_mode = args['patient_mode']
@@ -413,28 +467,29 @@ class GraphCare(nn.Module):
         self.max_visit = args['visit_thresh']
         self.hidden_dim = args['hidden_dim']
         self.out_channels = args['out_dim']
+        node_embed = args['global_node_attr']
+        edge_embed = args['global_edge_attr']
         self.drop_rate = 0.
-        self.dropout = 0.
-        self.attn_init = None
+        self.dropout = 0.5
+        self.attn_init = 1
         self.self_attn = 0.
 
         j = torch.arange(self.max_visit).float()
         self.lambda_j = torch.exp(self.decay_rate * (self.max_visit - j)).unsqueeze(0).reshape(1, self.max_visit,
                                                                                                1).float()
 
-        self.node_emb = nn.Embedding(self.num_nodes + 1, self.embedding_dim, padding_idx=0)
-        self.edge_emb = nn.Embedding(self.num_edges + 1, self.embedding_dim, padding_idx=0)
-        # if node_emb is None:
-        # self.node_emb = nn.Embedding(self.num_nodes, self.embedding_dim)
-        # else:
-        #     self.node_emb = nn.Embedding.from_pretrained(self.node_emb, freeze=freeze)
+        if node_embed is None:
+            self.node_emb = nn.Embedding(self.num_nodes + 1, self.embedding_dim, padding_idx=0)
+        else:
+            self.node_emb = nn.Embedding.from_pretrained(node_embed, freeze=False, padding_idx=0)
 
-        # if rel_emb is None:
-        #     self.rel_emb = nn.Embedding(self.num_rels, self.embedding_dim)
-        # else:
-        #     self.rel_emb = nn.Embedding.from_pretrained(self.rel_emb, freeze=freeze)
+        if edge_embed is None:
+            self.edge_emb = nn.Embedding(self.num_edges + 1, self.embedding_dim, padding_idx=0)
+        else:
+            edge_emb = edge_embed.to(torch.float32)
+            self.edge_emb = nn.Embedding.from_pretrained(edge_emb, freeze=False, padding_idx=0)
 
-        self.lin = nn.Linear(self.embedding_dim, self.hidden_dim)
+        self.lin = nn.Linear(node_embed.size(-1), self.hidden_dim)
         self.bn1 = nn.BatchNorm1d(self.hidden_dim)
 
         self.alpha_attn = nn.ModuleDict()
@@ -446,14 +501,14 @@ class GraphCare(nn.Module):
         self.relu = nn.ReLU()
         self.tahh = nn.Tanh()
 
-        for layer in range(1, self.gnn_layer + 1):
+        for layer in range(1, self.layer + 1):
             if self.use_alpha:
                 self.alpha_attn[str(layer)] = nn.Linear(self.num_nodes + 1, self.num_nodes + 1)
 
                 if self.attn_init is not None:
-                    self.attn_init = self.attn_init.float()  # Convert attn_init to float
+                    # self.attn_init = self.attn_init.float()  # Convert attn_init to float
                     attn_init_matrix = torch.eye(
-                        self.num_nodes).float() * self.attn_init  # Multiply the identity matrix by attn_init
+                        self.num_nodes + 1).float() * self.attn_init  # Multiply the identity matrix by attn_init
                     self.alpha_attn[str(layer)].weight.data.copy_(
                         attn_init_matrix)  # Copy the modified attn_init_matrix to the weights
 
@@ -498,11 +553,9 @@ class GraphCare(nn.Module):
         node_ids = kwargs['cat_node_ids']
         edge_ids = kwargs['cat_edge_ids']
         edge_index = kwargs['cat_edge_index']
-        edge_attr = kwargs['cat_edge_attr']
-        visit_node = kwargs['visit_nodes']
-        ehr_nodes = kwargs['ehr_nodes']
+        visit_node = kwargs['visit_nodes']  # (B,V,node_num)
+        ehr_nodes = kwargs['ehr_nodes']  # (B,node_num)
         batch = kwargs['batch']
-        batch_patient = kwargs['batch_patient']
 
         if in_drop and self.drop_rate > 0:
             edge_count = edge_index.size(1)
@@ -525,7 +578,7 @@ class GraphCare(nn.Module):
             self.attention_weights = []
             self.edge_weights = []
 
-        for layer in range(1, self.gnn_layer + 1):
+        for layer in range(1, self.layer + 1):
             if self.use_alpha:
                 # alpha = masked_softmax((self.leakyrelu(self.alpha_attn[str(layer)](visit_node.float()))), mask=visit_node>1, dim=1)
                 alpha = torch.softmax((self.alpha_attn[str(layer)](visit_node.float())),
@@ -533,10 +586,11 @@ class GraphCare(nn.Module):
 
             if self.use_beta:
                 # beta = masked_softmax((self.leakyrelu(self.beta_attn[str(layer)](visit_node.float()))), mask=visit_node>1, dim=0) * self.lambda_j
-                beta = torch.tanh((self.beta_attn[str(layer)](visit_node.float()))) * self.lambda_j
+                beta = torch.tanh(
+                    (self.beta_attn[str(layer)](visit_node.float()))) * self.lambda_j  # (batch, max_visit, 1)
 
             if self.use_alpha and self.use_beta:
-                attn = alpha * beta
+                attn = alpha * beta  # (batch, max_visit, num_nodes)
             elif self.use_alpha:
                 attn = alpha * torch.ones((batch.max().item() + 1, self.max_visit, 1)).to(edge_index.device)
             elif self.use_beta:
@@ -566,29 +620,23 @@ class GraphCare(nn.Module):
 
         if self.patient_mode == "joint" or self.patient_mode == "graph":
             # patient graph embedding through global mean pooling
-            x_graph = global_mean_pool(x, batch)
+            x_graph = global_mean_pool(x, batch)  # (B,D)
             x_graph = F.dropout(x_graph, p=self.dropout, training=self.training)
 
         if self.patient_mode == "joint" or self.patient_mode == "node":
             # patient node embedding through local (direct EHR) mean pooling
-            # x_node = torch.stack([
-            #     ehr_nodes[i].view(1, -1) @ self.node_emb.weight / torch.sum(ehr_nodes[i])
-            #     for i in range(batch.max().item() + 1)
-            # ])
             x_node = torch.stack([
-                visit_node[i].view(1, -1) @ self.node_emb.weight / torch.sum(visit_node[i])
-                if torch.sum(visit_node[i]) != 0 else torch.zeros(1, self.embedding_dim, device=edge_index.device)
+                ehr_nodes[i].view(1, -1) @ self.node_emb.weight / torch.sum(ehr_nodes[i])
                 for i in range(batch.max().item() + 1)
             ])
+
             x_node = self.lin(x_node).squeeze(1)
-            x_node = F.dropout(x_node, p=self.dropout, training=self.training)
+            x_node = F.dropout(x_node, p=self.dropout, training=self.training)  # (B,D)
 
         if self.patient_mode == "joint":
             # concatenate patient graph embedding and patient node embedding
             x_concat = torch.cat((x_graph, x_node), dim=1)
             x_concat = F.dropout(x_concat, p=self.dropout, training=self.training)
-
-            x_concat = global_mean_pool(x_concat, batch_patient)
 
             # MLP for prediction
             logits = self.MLP(x_concat)
@@ -601,132 +649,379 @@ class GraphCare(nn.Module):
             # MLP for prediction
             logits = self.MLP(x_node)
 
-        if store_attn:
-            return logits, self.alpha_weights, self.beta_weights, self.attention_weights, self.edge_weights
-        else:
-            return logits, None
+        return {'logits': [logits], 'prototypes': None, 'embeddings': None, 'scores': None}
 
 
-class OurModel(nn.Module):
+class MPCare_Pretrain(nn.Module):
 
     def __init__(self, args):
 
         super().__init__()
 
-        device = args['device']
+        self.device = args['device']
         self.num_nodes = args['num_nodes']
-        self.num_edges = args['num_nodes']
-        num_visits = args['visit_thresh']
-        max_weeks_between = args['max_weeks_between']
-        start_embed_dim = args['start_embed_dim']
-        self.gnn_hidden_dim = args['gnn_hidden_dim']
-        set_trans_hidden_dim = args['set_trans_hidden_dim']
-        set_trans_out_dim = args['set_trans_out_dim']
-        proto_hidden_dim = args['proto_hidden_dim']
-        proto_out_dim = args['proto_out_dim']
-        time_trans_hidden_dim = args['time_trans_hidden_dim']
-        out_dim = args['out_dim']
+        self.num_edges = args['num_edges']
+        self.num_visits = args['visit_thresh']
+        self.num_codes = args['visit_code_num']
+        self.out_dim = args['out_dim']
+        self.start_embed_dim = args['start_embed_dim']
+        self.gnn_type = args['gnn_type']
         self.gnn_layer = args['gnn_layer']
-        proto_num = args['proto_num']
-        set_head_num = args['set_head_num']
-        set_num_inds = args['visit_thresh']
-        set_encoder_depth = args['set_encoder_depth']
-        set_decoder_depth = args['set_decoder_depth']
-        set_trans_out_num = args['set_trans_out_num']
-        proto_head_num = args['proto_head_num']
-        proto_depth = args['proto_depth']
-        time_head_num = args['time_head_num']
-        time_depth = args['time_depth']
-        node_embed = None
+        self.hidden_dim = args['hidden_dim']
+        self.head_num = args['head_num']
+        self.depth = args['depth']
+        self.set_trans_out_num = args['set_trans_out_num']
+        self.max_weeks_between = args['max_weeks_between']
+        node_embed = args['global_node_attr']
+        edge_embed = args['global_edge_attr']
+        edge_index = args['global_edge_index']
+        edge_ids = args['global_edge_ids']
 
-        self.full_node_ids = torch.arange(self.num_nodes + 1).to(device)
-
-        self.prototypes = nn.Parameter(torch.randn(proto_num, set_trans_out_dim))
+        self.full_node_ids = torch.arange(self.num_nodes + 1).to(self.device)
+        self.full_edge_ids = torch.arange(self.num_edges + 1).to(self.device)
 
         if node_embed is None:
-            self.node_embed = nn.Embedding(self.num_nodes + 1, start_embed_dim, padding_idx=0)
-        '''
+            self.node_embed = nn.Embedding(self.num_nodes + 1, self.start_embed_dim, padding_idx=0)
         else:
-            self.node_embed = nn.Embedding.from_pretrained(node_embed, freeze=freeze)
+            self.node_embed = nn.Embedding.from_pretrained(node_embed, freeze=False, padding_idx=0)
+            self.node_projection = nn.Linear(node_embed.size(-1), self.start_embed_dim)
 
         if edge_embed is None:
-            self.edge_embed = nn.Embedding(num_edges+1, embed_dim)
+            self.edge_embed = nn.Embedding(self.num_edges + 1, self.start_embed_dim, padding_idx=0)
         else:
-            self.edge_embed = nn.Embedding.from_pretrained(edge_embed, freeze=freeze)
-        '''
+            edge_embed = edge_embed.to(torch.float32)
+            self.edge_embed = nn.Embedding.from_pretrained(edge_embed, freeze=False, padding_idx=0)
+            self.edge_projection = nn.Linear(edge_embed.size(-1), self.start_embed_dim)
 
-        self.time_trans_embed = DataEmbedding(num_visits, max_weeks_between, proto_out_dim)
+        self.edge_index = edge_index.to(self.device)
+        self.edge_ids = edge_ids
 
-        self.fc = nn.Linear(start_embed_dim, self.gnn_hidden_dim)
+        self.set_trans_embed = CodeTypeEmbedding(4, self.hidden_dim, padding_idx=0)
+        self.gru_embed = DataEmbedding(self.num_visits, self.max_weeks_between, self.hidden_dim)
 
-        self.gnn = nn.ModuleList([GATConv(self.gnn_hidden_dim, self.gnn_hidden_dim) for _ in range(self.gnn_layer)])
+        if self.gnn_type == 'GAT':
+            self.gnn = nn.ModuleList([GATConv(self.hidden_dim, self.hidden_dim) for _ in range(self.gnn_layer)])
+        elif self.gnn_type == 'CompGCN':
+            self.gnn = nn.ModuleList([CompGCNConv(self.hidden_dim, self.hidden_dim) for _ in range(self.gnn_layer)])
 
-        self.set_transformer = SetTransformer(dim_input=self.gnn_hidden_dim,
-                                              num_outputs=set_trans_out_num,
-                                              dim_output=set_trans_out_dim,
-                                              num_inds=set_num_inds,
-                                              dim_hidden=set_trans_hidden_dim,
-                                              num_heads=set_head_num,
-                                              encoder_depth=set_encoder_depth,
-                                              decoder_depth=set_decoder_depth)
+        self.set_transformer = SetTransformer(dim_input=self.hidden_dim,
+                                              num_outputs=self.set_trans_out_num,
+                                              dim_output=self.hidden_dim,
+                                              num_visits=self.num_visits,
+                                              dim_hidden=self.hidden_dim,
+                                              num_heads=self.head_num,
+                                              encoder_depth=self.depth,
+                                              decoder_depth=self.depth,
+                                              qkv_length=4)
 
-        self.prototype_learner = PrototypeLearner(input_dim=set_trans_out_dim,
-                                                  hidden_dim=proto_hidden_dim,
-                                                  output_dim=proto_out_dim,
-                                                  num_heads=proto_head_num,
-                                                  depth=proto_depth)
+        self.h_0 = nn.Parameter(torch.Tensor(1, 1, self.hidden_dim))
+        nn.init.xavier_uniform_(self.h_0)
 
-        self.time_transformer = TimeTransformer(hidden_dim=time_trans_hidden_dim,
-                                                num_heads=time_head_num,
-                                                depth=time_depth)
+        self.gru = nn.GRU(input_size=self.hidden_dim,
+                          hidden_size=self.hidden_dim,
+                          num_layers=1,
+                          batch_first=True,
+                          bidirectional=False)
 
-        self.head = PredictionHead(attn_hidden_dim=2 * time_trans_hidden_dim,
-                                   mlp_input_dim=2 * time_trans_hidden_dim,
-                                   mlp_hidden_dim=2 * time_trans_hidden_dim,
-                                   mlp_output_dim=out_dim)
+        self.visit_projector = nn.Linear(self.hidden_dim, self.out_dim)
+        self.patient_projector = nn.Linear(self.hidden_dim, self.out_dim)
 
     def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask, **kwargs):
 
         x = self.node_embed(self.full_node_ids)  # (node_num,D)
-        # x = self.fc(x)
+        edge_attr = self.edge_embed(self.full_edge_ids)  # (edge_num,D)
+
+        x = self.node_projection(x)
+        edge_attr = self.edge_projection(edge_attr)
 
         # Global GNN
-        for layer in self.gnn:
-            x = layer(x, edge_idx, edge_attr=edge_attr)
+        if self.gnn_type == 'GAT':
+            for layer in self.gnn:
+                x = layer(x, self.edge_index, edge_attr=edge_attr)
+        elif self.gnn_type == 'CompGCN':
+            for layer in self.gnn:
+                x, edge_attr = layer(x, self.edge_index, self.edge_ids, edge_attr)
+        code_embed = x.clone()  # code_representaiton: (node_num,D)
 
         B, V, N = node_ids.shape
         x = x.unsqueeze(0).unsqueeze(0).expand(B, V, -1, -1)  # (B,V,node_num,D)
-        x = torch.gather(x, 2, node_ids.unsqueeze(-1).expand(-1, -1, -1, self.gnn_hidden_dim))
+        x = torch.gather(x, 2, node_ids.unsqueeze(-1).expand(-1, -1, -1, self.hidden_dim))
 
         # Set Transformer
-        x = self.set_transformer(x, attn_mask=attn_mask)  # (B,V,1,D)
-        visit_x = x
-
-        # Learn Prototypes
-        prototypes = self.prototypes.unsqueeze(0).unsqueeze(0)
-        prototypes = prototypes.repeat(B, V, 1, 1)  # (B,V,proto_num,D)
-        x = self.prototype_learner(x, prototypes)  # (B,V,1,D)
-
-        # Pos and Time Embedding
-        embed = self.time_trans_embed(visit_order, visit_times)  # (B,V,D)
-
-        # Time-Aware Transformer
+        visit_node_type = kwargs['visit_node_type']
+        type_embed = self.set_trans_embed(visit_node_type)
+        x, _, _ = self.set_transformer(x, type_embed, attn_mask=attn_mask, return_scores=False)  # (B,V,1,D)
         x = x.squeeze(-2)
-        visit_x = visit_x.squeeze(-2)
-        x = self.time_transformer(x, visit_x, embed, attn_mask=attn_mask)
+        visit_embed = x.clone()
+
+        out_1 = self.visit_projector(x)  # (B,V,node_num)
+
+        # GRU
+        data_embed = self.gru_embed(visit_order, visit_times)
+        x = x + data_embed
+        x, _ = self.gru(x, self.h_0.repeat(1, B, 1))
+
+        visit_mask = attn_mask.all(dim=-1)
+        visit_mask = ~visit_mask
+
+        gru_mask = visit_mask.to(int)
+        gru_mask = torch.sum(gru_mask, dim=-1) - 1
+        x = x[torch.arange(B), gru_mask]
+        patient_embed = x.clone()  # Patient Representation: (B,D)
+
+        out_2 = self.patient_projector(x)
+
+        visit_embed_mask = visit_mask.unsqueeze(-1).expand(-1, -1, self.hidden_dim)
+        visit_embed = visit_embed[visit_embed_mask].view(-1, self.hidden_dim)  # visit representation: (Nv,D)
+
+        set_trans__mask = visit_mask.unsqueeze(-1).expand(-1, -1, self.num_nodes + 1)
+        out_1 = out_1[set_trans__mask].view(-1, self.num_nodes + 1)
+
+        embeddings = {'patient_embed': patient_embed, 'visit_embed': visit_embed, 'code_embed': code_embed}
+
+        return {'logits': [out_1, out_2], 'prototypes': None, 'embeddings': embeddings, 'scores': None}
+
+
+class MPCare_Finetune(nn.Module):
+
+    def __init__(self, args):
+
+        super().__init__()
+
+        self.device = args['device']
+        self.num_nodes = args['num_nodes']
+        self.num_edges = args['num_edges']
+        self.num_visits = args['visit_thresh']
+        self.num_codes = args['visit_code_num']
+        self.out_dim = args['out_dim']
+        self.class_num = args['class_num']
+        self.start_embed_dim = args['start_embed_dim']
+        self.gnn_type = args['gnn_type']
+        self.gnn_layer = args['gnn_layer']
+        self.hidden_dim = args['hidden_dim']
+        self.head_num = args['head_num']
+        self.depth = args['depth']
+        self.imp_depth = args['imp_depth']
+        self.set_trans_out_num = args['set_trans_out_num']
+        self.max_weeks_between = args['max_weeks_between']
+        self.multi_level_embed = args['multi_level_embed']
+        self.code_proto_num = args['code_proto_num']
+        self.visit_proto_num = args['visit_proto_num']
+        self.patient_proto_num = args['patient_proto_num']
+        self.learnable_proto = args['learnable_proto']
+        self.join_method = args['join_method']
+        self.residual = args['residual']
+        node_embed = args['global_node_attr']
+        edge_embed = args['global_edge_attr']
+        edge_index = args['global_edge_index']
+        edge_ids = args['global_edge_ids']
+
+        self.full_node_ids = torch.arange(self.num_nodes + 1).to(self.device)
+        self.full_edge_ids = torch.arange(self.num_edges + 1).to(self.device)
+        self.node_projection = None
+        self.edge_projection = None
+
+        if node_embed is None:
+            self.node_embed = nn.Embedding(self.num_nodes + 1, self.start_embed_dim, padding_idx=0)
+        else:
+            self.node_embed = nn.Embedding.from_pretrained(node_embed, freeze=False, padding_idx=0)
+            self.node_projection = nn.Linear(node_embed.size(-1), self.start_embed_dim)
+
+        if edge_embed is None:
+            self.edge_embed = nn.Embedding(self.num_edges + 1, self.start_embed_dim, padding_idx=0)
+        else:
+            edge_embed = edge_embed.to(torch.float32)
+            self.edge_embed = nn.Embedding.from_pretrained(edge_embed, freeze=False, padding_idx=0)
+            self.edge_projection = nn.Linear(edge_embed.size(-1), self.start_embed_dim)
+
+        self.edge_index = edge_index.to(self.device)
+        self.edge_ids = edge_ids
+
+        if self.multi_level_embed is None:
+            self.visit_prototype_labels = None
+            self.patient_prototype_labels = None
+            self.visit_prototypes = nn.Parameter(torch.Tensor(self.visit_proto_num, self.hidden_dim),
+                                                 requires_grad=True)
+            self.patient_prototypes = nn.Parameter(torch.Tensor(self.patient_proto_num, self.hidden_dim),
+                                                   requires_grad=True)
+            nn.init.xavier_uniform_(self.visit_prototypes)
+            nn.init.xavier_uniform_(self.patient_prototypes)
+        else:
+            visit_embed = self.multi_level_embed['visit_embed']
+            patient_embed = self.multi_level_embed['patient_embed']
+            visit_embed = torch.cat(visit_embed, dim=0)
+            patient_embed = torch.cat(patient_embed, dim=0)
+
+            visit_prototypes, self.visit_prototype_labels = self.kmeans(visit_embed, self.visit_proto_num, self.device)
+            patient_prototypes, self.patient_prototype_labels = self.kmeans(patient_embed, self.patient_proto_num,
+                                                                            self.device)
+
+            visit_prototypes = visit_prototypes.to(torch.float32)
+            patient_prototypes = patient_prototypes.to(torch.float32)
+
+            self.visit_prototypes = nn.Parameter(visit_prototypes, requires_grad=self.learnable_proto)
+            self.patient_prototypes = nn.Parameter(patient_prototypes, requires_grad=self.learnable_proto)
+
+        self.set_trans_embed = CodeTypeEmbedding(4, self.hidden_dim, padding_idx=0)
+        self.gru_embed = DataEmbedding(self.num_visits, self.max_weeks_between, self.hidden_dim)
+
+        if self.gnn_type == 'GAT':
+            self.gnn = nn.ModuleList([GATConv(self.hidden_dim, self.hidden_dim) for _ in range(self.gnn_layer)])
+        elif self.gnn_type == 'CompGCN':
+            self.gnn = nn.ModuleList([CompGCNConv(self.hidden_dim, self.hidden_dim) for _ in range(self.gnn_layer)])
+
+        self.set_transformer = SetTransformer(dim_input=self.hidden_dim,
+                                              num_outputs=self.set_trans_out_num,
+                                              dim_output=self.hidden_dim,
+                                              num_visits=self.num_visits,
+                                              dim_hidden=self.hidden_dim,
+                                              num_heads=self.head_num,
+                                              encoder_depth=self.depth,
+                                              decoder_depth=self.depth,
+                                              qkv_length=4)
+
+        self.h_0 = nn.Parameter(torch.Tensor(1, 1, self.hidden_dim))
+        nn.init.xavier_uniform_(self.h_0)
+
+        self.gru = nn.GRU(input_size=self.hidden_dim,
+                          hidden_size=self.hidden_dim,
+                          num_layers=1,
+                          batch_first=True,
+                          bidirectional=False)
+
+        self.code_attn = ImportanceAttention(hidden_dim=self.hidden_dim, num_heads=self.head_num, depth=self.imp_depth)
+        self.visit_attn = ImportanceAttention(hidden_dim=self.hidden_dim, num_heads=self.head_num, depth=self.imp_depth)
+        self.patient_attn = ImportanceAttention(hidden_dim=self.hidden_dim,
+                                                num_heads=self.head_num,
+                                                depth=self.imp_depth)
+
+        if self.join_method == 'add':
+            self.head = nn.Linear(self.hidden_dim, self.out_dim)
+        elif self.join_method == 'concat':
+            self.head = nn.Linear(3 * self.hidden_dim, self.out_dim)
+
+    def kmeans(self, X, k, device, max_iters=1000):
+
+        X = X.to(device)
+        centroids = X[torch.randint(0, X.size(0), (k,))].to(device)
+
+        for _ in range(max_iters):
+            distances = torch.cdist(X, centroids)
+            labels = torch.argmin(distances, dim=1)
+
+            new_centroids = torch.stack([
+                X[labels == i].mean(dim=0) if
+                (labels == i).sum() > 0 else X[torch.randint(0, X.size(0), (1,))].squeeze(0) for i in range(k)
+            ])
+
+            if torch.allclose(centroids, new_centroids, atol=1e-4):
+                break
+
+            centroids = new_centroids
+
+        return centroids, labels
+
+    def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask, **kwargs):
+
+        x = self.node_embed(self.full_node_ids)  # (node_num,D)
+        edge_attr = self.edge_embed(self.full_edge_ids)  # (edge_num,D)
+
+        if self.node_projection is not None:
+            x = self.node_projection(x)
+        if self.edge_projection is not None:
+            edge_attr = self.edge_projection(edge_attr)
+
+        # Global GNN
+        if self.gnn_type == 'GAT':
+            for layer in self.gnn:
+                x = layer(x, self.edge_index, edge_attr=edge_attr)
+        elif self.gnn_type == 'CompGCN':
+            for layer in self.gnn:
+                x, edge_attr = layer(x, self.edge_index, self.edge_ids, edge_attr)
+        code_embed = x.clone()  # Code Representation: (node_num,D)
+
+        # Get Code Prototypes
+        code_prototypes, code_prototype_labels = self.kmeans(x, self.code_proto_num, device=self.device)
+
+        B, V, N = node_ids.shape
+        x = x.unsqueeze(0).unsqueeze(0).expand(B, V, -1, -1)  # (B,V,node_num,D)
+        x = torch.gather(x, 2, node_ids.unsqueeze(-1).expand(-1, -1, -1, self.hidden_dim))
+
+        # Set Transformer
+        visit_node_type = kwargs['visit_node_type']
+        type_embed = self.set_trans_embed(visit_node_type)
+        x, _, _ = self.set_transformer(x, type_embed, attn_mask=attn_mask, return_scores=False)  # (B,V,1,D)
+
+        x = x.squeeze(-2)
+        visit_embed = x.clone()
+
+        # GRU
+        data_embed = self.gru_embed(visit_order, visit_times)  # (B,V,D)
+        x = x + data_embed
+        x, _ = self.gru(x, self.h_0.repeat(1, B, 1))
+
+        visit_mask = attn_mask.all(dim=-1)
+        visit_mask = ~visit_mask
+        visit_mask = visit_mask.to(int)
+        mask = torch.sum(visit_mask, dim=-1) - 1
+        x = x[torch.arange(B), mask]
+        patient_embed = x.clone()  # Patient Representation: (B,D)
+
+        # Importance Attention
+        code_prototypes = F.normalize(code_prototypes, p=2, dim=-1)
+        visit_prototypes = F.normalize(self.visit_prototypes, p=2, dim=-1)
+        patient_prototypes = F.normalize(self.patient_prototypes, p=2, dim=-1)
+
+        x_code, code_scores = self.code_attn(x, code_prototypes, return_scores=True)
+        x_visit, visit_scores = self.visit_attn(x, visit_prototypes, return_scores=True)
+        x_patient, patient_scores = self.patient_attn(x, patient_prototypes, return_scores=True)
+
+        if self.join_method == 'add':
+            if self.residual:
+                x = x + x_code + x_visit + x_patient  # (B,D)
+            else:
+                x = x_code + x_visit + x_patient
+
+        elif self.join_method == 'concat':
+            if self.residual:
+                x_code = x_code + x
+                x_visit = x_visit + x
+                x_patient = x_patient + x
+            x = torch.cat((x_code, x_visit, x_patient), dim=-1)  # (B,3D)
 
         # Prediction
         out = self.head(x)
 
-        return out, self.prototypes
+        visit_mask = attn_mask.all(dim=-1)
+        visit_mask = ~visit_mask
+        visit_embed_mask = visit_mask.unsqueeze(-1).expand(-1, -1, self.hidden_dim)
+        visit_embed = visit_embed[visit_embed_mask].view(-1, self.hidden_dim)  # Visit Representation: (Nv,D)
+
+        prototypes = {
+            'patient_prototypes': self.patient_prototypes,
+            'visit_prototypes': self.visit_prototypes,
+            'code_prototypes': code_prototypes,
+            'patient_prototype_labels': self.patient_prototype_labels,
+            'visit_prototype_labels': self.visit_prototype_labels,
+            'code_prototype_labels': code_prototype_labels
+        }
+
+        embeddings = {'patient_embed': patient_embed, 'visit_embed': visit_embed, 'code_embed': code_embed}
+
+        scores = {
+            'patient_prototype_scores': patient_scores,
+            'visit_prototype_scores': visit_scores,
+            'code_prototype_scores': code_scores
+        }
+
+        return {'logits': [out], 'prototypes': prototypes, 'embeddings': embeddings, 'scores': scores}
 
 
 MODELS = {
-    'OurModel': OurModel,
+    'MPCare_Pretrain': MPCare_Pretrain,
+    'MPCare_Finetune': MPCare_Finetune,
     'GraphCare': GraphCare,
     'StageNet': StageNet,
-    # 'GRAM': GRAM,
-    # 'RETAIN': RETAIN,
     'AdaCare': AdaCare,
     'Deepr': Deepr,
     'Transformer': Transformer,
