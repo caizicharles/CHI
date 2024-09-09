@@ -142,3 +142,8 @@ def format_code_map(input: List[Dict]) -> Dict:
         name_to_code |= {row['code_name']: row['code']}
 
     return code_to_name, name_to_code
+
+
+def convert_to_uppercase(s: str):
+
+    return ''.join([char.upper() if char.isalpha() else char for char in s])

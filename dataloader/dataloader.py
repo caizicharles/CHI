@@ -76,29 +76,41 @@ class DataLoader():
 
         batch_data.global_edge_index = self.graph.edge_index
         batch_data.global_edge_attr = self.graph.edge_attr
+        batch_data.global_edge_ids = self.graph.edge_ids
 
         visit_node_ids = [data['visit_node_ids'] for data in grouped_patients]
-        # visit_edge_ids = [data['visit_edge_ids'] for data in grouped_patients]
-        # visit_edge_index = [data['visit_edge_index'] for data in grouped_patients]
-        # visit_edge_attr = [data['visit_edge_attr'] for data in grouped_patients]
-        visit_nodes = [data['visit_nodes'] for data in grouped_patients]
-        ehr_nodes = [data['ehr_nodes'] for data in grouped_patients]
         visit_rel_times = [data['visit_rel_times'] for data in grouped_patients]
         visit_order = [data['visit_order'] for data in grouped_patients]
+        visit_node_type = [data['visit_node_type'] for data in grouped_patients]
         attn_mask = [data['node_padding_mask'] for data in grouped_patients]
-        labels = [[data['labels']] for data in grouped_patients]
 
         batch_data.visit_node_ids = torch.stack(visit_node_ids)
-        # batch_data.visit_edge_index = torch.cat(visit_edge_index, dim=-1)
-        # batch_data.visit_edge_attr = torch.cat(visit_edge_attr, dim=0)
         batch_data.visit_rel_times = torch.stack(visit_rel_times)
         batch_data.visit_order = torch.stack(visit_order)
+        batch_data.visit_node_type = torch.stack(visit_node_type)
         batch_data.attn_mask = torch.stack(attn_mask)
-        batch_data.labels = torch.tensor(labels)
+
+        if self.task != 'pretrain':
+            visit_nodes = [data['visit_nodes'].unsqueeze(0) for data in grouped_patients]
+            ehr_nodes = [data['ehr_nodes'] for data in grouped_patients]
+            labels = [data['labels'] for data in grouped_patients]
+            batch_data.labels = torch.cat(labels, dim=0)
+
+        else:
+            set_trans_label = [data['set_trans_label'].unsqueeze(0) for data in grouped_patients]
+            gru_label = [data['gru_label'].unsqueeze(0) for data in grouped_patients]
+
+            batch_data.set_trans_label = torch.cat(set_trans_label, dim=0)
+            batch_data.gru_label = torch.cat(gru_label, dim=0)
+
+        if 'labels_additional' in grouped_patients[0].keys():
+            labels_additional = [data['labels_additional'] for data in grouped_patients]
+            batch_data.labels_additional = torch.cat(labels_additional, dim=0)
 
         if self.get_additional:
             _batch = []
             batch_patient = []
+            patient_indicator = []
 
             for patient_idx, data in enumerate(grouped_patients):
                 _visit_node_ids = data['visit_node_ids']
@@ -117,6 +129,7 @@ class DataLoader():
 
                     _batch.append(single_visit_graph)
                     batch_patient.append(patient_idx)
+                    patient_indicator.extend([patient_idx] * len(single_visit_graph.node_ids))
 
             batch_graph = Batch.from_data_list(_batch)
 
@@ -124,10 +137,9 @@ class DataLoader():
             batch_data.cat_edge_ids = batch_graph.edge_ids
             batch_data.cat_edge_index = batch_graph.edge_index
             batch_data.cat_edge_attr = batch_graph.edge_attr
-            batch_data.batch = batch_graph.batch
-            batch_data.visit_nodes = torch.cat(visit_nodes, dim=0).unsqueeze(1)
+            batch_data.batch = torch.tensor(patient_indicator)
+            batch_data.visit_nodes = torch.cat(visit_nodes, dim=0)
             batch_data.ehr_nodes = torch.stack(ehr_nodes)
-            # batch_data.visit_edge_ids = torch.stack(visit_edge_ids)
             batch_data.batch_patient = torch.tensor(batch_patient)
 
         else:
