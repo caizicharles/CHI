@@ -1,56 +1,59 @@
 dataset: mimiciv
 task: readmission_prediction
 seed: 0
+save_params: False
 
-age_thresh_low: 18
-age_thresh_high: 80
-code_freq_filter: 60
-visit_thresh: 15
-pad_dim: 60
+triplet_method: LLM
+code_thresh: 60
+visit_thresh: 10
 
 train_proportion: 0.8
 val_proportion: 0.1
 test_proportion: 0.1
-train_batch_size: 3
-val_batch_size: 3
-test_batch_size: 3
-num_epochs: 100
-val_freq: 5
-logging_freq: 200
-
-triplet_method: co-occurrence
+train_batch_size: 128
+val_batch_size: 128
+test_batch_size: 128
+max_epoch: 300
+early_stopping_threshold: 10
+early_stopping_indicator: AUPRC
+val_freq: 1
+logging_freq: 50
 
 model:
   name: StageNet
   model_type: baseline
+  mode: train
+  save_embed:
+  load_embed:
+  freeze: False
   args:
     input_dim: 128
     hidden_dim: 128
     conv_size: 2
-    levels: 1
+    levels: 2
 
 optimizer:
   name: Adam
   args:
-    lr: 0.0005
-    weight_decay: 0.0001
+    lr: 0.0001
+    weight_decay: 0.
 
 scheduler:
-  name: StepLR
-  args:
-    step_size: 20
-    gamma: 0.0001
 
 criterion:
+  # cross_entropy:
+  #   reduction: mean
   binary_entropy:
     reduction: mean
 
 metrics:
   - AUROC
   - AUPRC
-  - AP
+  # - Kappa
+  # - F1
+  # - Jaccard
+  - Accuracy
 
-raw_data_path: /home/engs2635/Desktop/caizi/raw_data
-save_data_path: /home/engs2635/Desktop/caizi/CHI/data/mimiciv
-graph_construction_path: /home/engs2635/Desktop/caizi/graph_construction
+processed_data_path: /home/engs2635/Desktop/caizi/CHI/data/mimiciv
 log_path: /home/engs2635/Desktop/caizi/CHI/logs
+pretrained:

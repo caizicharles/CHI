@@ -1,0 +1,82 @@
+dataset: mimiciv
+task: drug_recommendation
+seed: 0
+save_params: True
+
+triplet_method: LLM
+code_thresh: 60
+visit_thresh: 15
+
+train_proportion: 0.8
+val_proportion: 0.1
+test_proportion: 0.1
+train_batch_size: 128
+val_batch_size: 128
+test_batch_size: 128
+max_epoch: 300
+early_stopping_threshold: 20
+early_stopping_indicator: AUPRC
+val_freq: 1
+logging_freq: 50
+
+model:
+  name: MPCare_Finetune
+  model_type: base
+  mode: train
+  freeze: False
+  save_embed: True
+  load_embed: /home/engs2635/Desktop/caizi/CHI/logs/multi_level_embed_storage/mimiciv/pretrain/LLM_MPCare_Pretrain_20240909_003550_train_embed.pth
+  args:
+    start_embed_dim: 64
+    gnn_type: CompGCN
+    gnn_layer: 1
+    hidden_dim: 64
+    head_num: 2
+    depth: 2
+    imp_depth: 2
+    set_trans_out_num: 1
+    max_weeks_between: 630
+    code_proto_num: 4
+    visit_proto_num: 4
+    patient_proto_num: 4
+    learnable_proto: True
+    join_method: add
+    residual: False
+
+optimizer:
+  name: Adam
+  args:
+    lr: 0.001
+    weight_decay: 0.
+
+scheduler:
+  # name: StepLR
+  # args:
+  #   step_size: 10
+  #   gamma: 0.00002
+
+criterion:
+  # orthogonality:
+  #   factor: 10
+  euc_dist:
+    normalize: True
+    factor: 0.01
+  # cross_entropy:
+  #   reduction: mean
+  binary_entropy:
+    reduction: mean
+  # focal:
+  #   alpha: 0.8
+  #   gamma: 2
+
+metrics:
+  - AUROC
+  - AUPRC
+  # - Kappa
+  - F1
+  - Jaccard
+  - Accuracy
+
+processed_data_path: /home/engs2635/Desktop/caizi/CHI/data/mimiciv
+log_path: /home/engs2635/Desktop/caizi/CHI/logs
+pretrained: /home/engs2635/Desktop/caizi/CHI/logs/checkpoints/mimiciv/pretrain/LLM_MPCare_Pretrain_s0_20240909_003550.pth
