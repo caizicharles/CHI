@@ -5,9 +5,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch_geometric.nn import GATConv, GINConv, global_mean_pool
+from typing import Dict
 
 from .modules import CodeTypeEmbedding, DataEmbedding, CompGCNConv, SetTransformer, ImportanceAttention,\
-BiAttentionGNNConv, CausalConv1d, Recalibration, DeeprLayer, TimeGapEmbedding
+BiAttentionGNNConv, CausalConv1d, Recalibration, DeeprLayer, TimeGapEmbedding, GRASPLayer
 
 
 class GRU(nn.Module):
@@ -447,6 +448,61 @@ class StageNet(nn.Module):
         output = output[torch.arange(B), mask]
 
         return {'logits': [output], 'prototypes': None, 'embeddings': None, 'scores': None}
+
+
+class GRASP(nn.Module):
+
+    def __init__(self, args):
+
+        super().__init__()
+
+        self.device = args['device']
+        self.num_nodes = args['num_nodes']
+        self.num_edges = args['num_edges']
+        self.num_visits = args['visit_thresh']
+        self.num_codes = args['visit_code_num']
+        self.out_dim = args['out_dim']
+        self.start_embed_dim = args['start_embed_dim']
+        self.hidden_dim = args['hidden_dim']
+        self.cluster_num = args['cluster_num']
+        self.block = args['block']
+        node_embed = args['global_node_attr']
+
+        self.full_node_ids = torch.arange(self.num_nodes + 1).to(self.device)
+
+        if node_embed is None:
+            self.node_embed = nn.Embedding(self.num_nodes + 1, self.start_embed_dim, padding_idx=0)
+        else:
+            self.node_embed = nn.Embedding.from_pretrained(node_embed, freeze=False, padding_idx=0)
+            self.node_projection = nn.Linear(node_embed.size(-1), self.start_embed_dim)
+
+        self.grasp = GRASPLayer(input_dim=self.hidden_dim,
+                                static_dim=0,
+                                hidden_dim=self.hidden_dim,
+                                cluster_num=self.cluster_num,
+                                block=self.block)
+
+        self.head = nn.Linear(self.hidden_dim, self.out_dim)
+
+    def forward(self, node_ids, edge_idx, edge_attr, visit_times, visit_order, attn_mask, **kwargs):
+
+        x = self.node_embed(self.full_node_ids)  # (node_num,D)
+        x = self.node_projection(x)
+
+        B, V, N = node_ids.shape
+        x = x.unsqueeze(0).unsqueeze(0).expand(B, V, -1, -1)  # (B,V,node_num,D)
+        x = torch.gather(x, 2, node_ids.unsqueeze(-1).expand(-1, -1, -1, self.hidden_dim))
+        x = torch.sum(x, dim=2)
+
+        visit_mask = attn_mask.all(dim=-1)
+        visit_mask = ~visit_mask
+        visit_mask = visit_mask.to(int)
+
+        x = self.grasp(x, mask=visit_mask)  # (B,D)
+
+        out = self.head(x)
+
+        return {'logits': [out], 'prototypes': None, 'embeddings': None, 'scores': None}
 
 
 class GraphCare(nn.Module):
@@ -1021,6 +1077,7 @@ MODELS = {
     'MPCare_Pretrain': MPCare_Pretrain,
     'MPCare_Finetune': MPCare_Finetune,
     'GraphCare': GraphCare,
+    'GRASP': GRASP,
     'StageNet': StageNet,
     'AdaCare': AdaCare,
     'Deepr': Deepr,

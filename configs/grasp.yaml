@@ -1,0 +1,59 @@
+dataset: mimiciv
+task: drug_recommendation
+seed: 0
+save_params: False
+
+triplet_method: LLM
+code_thresh: 60
+visit_thresh: 10
+
+train_proportion: 0.8
+val_proportion: 0.1
+test_proportion: 0.1
+train_batch_size: 128
+val_batch_size: 128
+test_batch_size: 128
+max_epoch: 300
+early_stopping_threshold: 10
+early_stopping_indicator: AUPRC
+val_freq: 1
+logging_freq: 50
+
+model:
+  name: GRASP
+  model_type: baseline
+  mode: train
+  save_embed: False
+  load_embed:
+  freeze: False
+  args:
+    start_embed_dim: 64
+    cluster_num: 12
+    hidden_dim: 64
+    block: ConCare
+
+optimizer:
+  name: Adam
+  args:
+    lr: 0.0001
+    weight_decay: 0.
+
+scheduler:
+
+criterion:
+  # cross_entropy:
+  #   reduction: mean
+  binary_entropy:
+    reduction: mean
+
+metrics:
+  - AUROC
+  - AUPRC
+  # - Kappa
+  - F1
+  - Jaccard
+  - Accuracy
+
+processed_data_path: /home/engs2635/Desktop/caizi/CHI/data
+log_path: /home/engs2635/Desktop/caizi/CHI/logs
+pretrained:
