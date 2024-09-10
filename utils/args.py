@@ -6,7 +6,7 @@ from .misc import get_time_str
 def get_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--dataset', type=str, default='mimic-iv')
+    parser.add_argument('--dataset', type=str, default='mimiciv')
     parser.add_argument('--task', type=str, default='')
     parser.add_argument('--seed', type=int, default=0)
 
