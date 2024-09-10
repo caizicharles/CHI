@@ -36,6 +36,8 @@ def seed_everything(seed: int):
 
 def load_all(processed_data_path: str, dataset_name: str, triplet_method: str, task: str):
 
+    processed_data_path = osp.join(processed_data_path, dataset_name)
+
     node_id_to_name = read_pickle_file(processed_data_path, f'{dataset_name}_node_id_to_name.pickle')
     triplet_id_to_info = read_pickle_file(processed_data_path,
                                           f'{dataset_name}_{triplet_method}_triplet_id_to_info.pickle')
