@@ -33,6 +33,10 @@ readmission_prediction:
 -----------------------------
 los_prediction:
   gru:
+    lr: 0.0001
+    input_dim: 128
+    hidden_dim: 128
+    layers: 2
 
   transformer:
 
@@ -43,8 +47,20 @@ los_prediction:
     window_size: 3
 
   adacare:
+    input_dim: 64
+    hidden_dim: 64
+    kernel_size: 2
+    kernel_num: 64
+    r_v: 4
+    r_c: 4
+    activation: sigmoid
 
   stagenet:
+    lr: 0.0001
+    inpu_dim: 128
+    hidden_dim: 128
+    conv_size: 4
+    level: 2
 
   grasp:
 
