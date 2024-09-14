@@ -1,4 +1,4 @@
------------------------------
+##################################
 mortality_prediction:
   gru:
 
@@ -14,7 +14,7 @@ mortality_prediction:
 
   graphcare:
 
------------------------------
+##################################
 readmission_prediction:
   gru:
 
@@ -30,7 +30,7 @@ readmission_prediction:
 
   graphcare:
 
------------------------------
+##################################
 los_prediction:
   gru:
     lr: 0.0001
@@ -39,6 +39,12 @@ los_prediction:
     layers: 2
 
   transformer:
+    lr: 0.00001
+    input_dim: 64
+    ff_dim: 64
+    head_num: 2
+    encoder_depth: 2
+    decoder_depth: 2
 
   deepr:
     lr: 0.0001
@@ -63,6 +69,11 @@ los_prediction:
     level: 2
 
   grasp:
+    lr: 0.0005
+    start_embed_dim: 64
+    cluster_num: 12
+    hidden_dim: 64
+    block: ConCare
 
   graphcare:
     lr: 0.0001
@@ -78,7 +89,7 @@ los_prediction:
     attn_init: 1
     dropout: 0.5
 
------------------------------
+##################################
 drug_recommendation:
   gru:
 
@@ -94,7 +105,7 @@ drug_recommendation:
 
   graphcare:
 
------------------------------
+##################################
 phenotype_prediction:
   gru:
 
