@@ -98,6 +98,12 @@ drug_recommendation:
     layers: 1
 
   transformer:
+    lr: 0.00005
+    input_dim: 64
+    ff_dim: 64
+    head_num: 2
+    encoder_depth: 1
+    decoder_depth: 1
 
   deepr:
     lr: 0.001
