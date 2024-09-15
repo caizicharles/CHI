@@ -107,6 +107,15 @@ drug_recommendation:
     window_size: 3
 
   adacare:
+    batch_size: 256
+    lr: 0.001
+    input_dim: 64
+    hidden_dim: 64
+    kernel_size: 4
+    kernel_num: 64
+    r_v: 4
+    r_c: 4
+    activation: sigmoid
 
   stagenet:
     lr: 0.0001
@@ -116,8 +125,23 @@ drug_recommendation:
     level: 1
 
   grasp:
+    batch_size: 256
+    lr: 0.001
 
   graphcare:
+    batch_size: 256
+    lr: 0.001
+    start_embed_dim: 128
+    hidden_dim: 128
+    gnn: BAT
+    gnn_layer: 3
+    decay_rate: 0.01
+    patient_mode: joint
+    use_alpha: True
+    use_beta: True
+    edge_attn: True
+    attn_init: 1
+    dropout: 0.5
 
 ##################################
 phenotype_prediction:
