@@ -126,7 +126,7 @@ drug_recommendation:
 
   grasp:
     batch_size: 256
-    lr: 0.001
+    lr: 0.005
     start_embed_dim: 64
     cluster_num: 12
     hidden_dim: 64
