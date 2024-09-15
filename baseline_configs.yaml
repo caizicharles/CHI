@@ -92,14 +92,28 @@ los_prediction:
 ##################################
 drug_recommendation:
   gru:
+    lr: 0.001
+    input_dim: 128
+    hidden_dim: 128
+    layers: 1
 
   transformer:
 
   deepr:
+    lr: 0.001
+    max_weeks_between: 630
+    start_embed_dim: 128
+    hidden_dim: 128
+    window_size: 3
 
   adacare:
 
   stagenet:
+    lr: 0.0001
+    inpu_dim: 128
+    hidden_dim: 128
+    conv_size: 2
+    level: 1
 
   grasp:
 
