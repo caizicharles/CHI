@@ -1,6 +1,22 @@
 ##################################
 mortality_prediction:
   gru:
+
+  transformer:
+
+  deepr:
+
+  adacare:
+
+  stagenet:
+
+  grasp:
+
+  graphcare:
+
+##################################
+readmission_prediction:
+  gru:
     batch_size: 128
     lr: 0.0001
     input_dim: 128
@@ -29,24 +45,19 @@ mortality_prediction:
 
   stagenet:
     batch_size: 128
+    lr: 0.0001
+    input_dim: 128
+    hidden_dim: 128
+    conv_size: 2
+    levels: 2
 
   grasp:
-
-  graphcare:
-
-##################################
-readmission_prediction:
-  gru:
-
-  transformer:
-
-  deepr:
-
-  adacare:
-
-  stagenet:
-
-  grasp:
+    batch_size: 128
+    lr: 0.0001
+    start_embed_dim: 64
+    cluster_num: 12
+    hidden_dim: 64
+    block: ConCare
 
   graphcare:
 
