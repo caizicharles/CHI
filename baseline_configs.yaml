@@ -1,14 +1,27 @@
 ##################################
 mortality_prediction:
   gru:
+    batch_size: 128
+    lr: 0.0001
+    input_dim: 128
+    hidden_dim: 128
+    layers: 3
 
   transformer:
 
   deepr:
+    batch_size: 128
+    max_weeks_between: 630
+    start_embed_dim: 128
+    hidden_dim: 128
+    window_size: 1
 
   adacare:
+    batch_size: 128
+    lr: 0.00005
 
   stagenet:
+    batch_size: 128
 
   grasp:
 
