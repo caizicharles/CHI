@@ -39,9 +39,9 @@ mortality_prediction:
   grasp:
     batch_size: 128
     lr: 0.0001
-    start_embed_dim: 64
+    start_embed_dim: 128
     cluster_num: 12
-    hidden_dim: 64
+    hidden_dim: 128
     block: ConCare
 
   graphcare:
