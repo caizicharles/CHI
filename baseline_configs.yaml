@@ -1,16 +1,48 @@
 ##################################
 mortality_prediction:
   gru:
+    batch_size: 128
+    lr: 0.00001
+    input_dim: 128
+    hidden_dim: 128
+    layers: 1
 
   transformer:
 
   deepr:
+    batch_size: 128
+    lr: 0.0001
+    max_weeks_between: 630
+    start_embed_dim: 256
+    hidden_dim: 256
+    window_size: 1
 
   adacare:
+    batch_size: 128
+    lr: 0.0001
+    input_dim: 128
+    hidden_dim: 128
+    kernel_size: 4
+    kernel_num: 64
+    r_v: 4
+    r_c: 4
+    activation: sigmoid
 
   stagenet:
+    batch_size: 128
+    lr: 0.0001
+    input_dim: 128
+    hidden_dim: 128
+    conv_size: 2
+    levels: 2
 
   grasp:
+    batch_size: 128
+    lr: 0.0001
+    start_embed_dim: 64
+    cluster_num: 12
+    hidden_dim: 64
+    block: ConCare
 
   graphcare:
 
