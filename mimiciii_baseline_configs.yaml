@@ -201,6 +201,7 @@ los_prediction:
 ##################################
 drug_recommendation:
   gru:
+    batch_size: 128
     lr: 0.001
     input_dim: 128
     hidden_dim: 128
@@ -215,6 +216,7 @@ drug_recommendation:
     decoder_depth: 1
 
   deepr:
+    batch_size: 128
     lr: 0.001
     max_weeks_between: 630
     start_embed_dim: 128
@@ -224,8 +226,8 @@ drug_recommendation:
   adacare:
     batch_size: 256
     lr: 0.001
-    input_dim: 64
-    hidden_dim: 64
+    input_dim: 128
+    hidden_dim: 128
     kernel_size: 4
     kernel_num: 64
     r_v: 4
@@ -233,11 +235,12 @@ drug_recommendation:
     activation: sigmoid
 
   stagenet:
-    lr: 0.0001
+    batch_size: 128
+    lr: 0.001
     inpu_dim: 128
     hidden_dim: 128
-    conv_size: 2
-    level: 1
+    conv_size: 4
+    level: 2
 
   grasp:
     batch_size: 256
