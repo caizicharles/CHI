@@ -134,12 +134,14 @@ readmission_prediction:
 ##################################
 los_prediction:
   gru:
+    batch_size: 128
     lr: 0.0001
     input_dim: 128
     hidden_dim: 128
     layers: 2
 
   transformer:
+    batch_size: 128
     lr: 0.00001
     input_dim: 64
     ff_dim: 64
@@ -148,12 +150,15 @@ los_prediction:
     decoder_depth: 2
 
   deepr:
+    batch_size: 128
     lr: 0.0001
     start_embed_dim: 128
     hidden_dim: 128
     window_size: 3
 
   adacare:
+    batch_size: 128
+    lr: 0.0001
     input_dim: 64
     hidden_dim: 64
     kernel_size: 2
@@ -163,6 +168,7 @@ los_prediction:
     activation: sigmoid
 
   stagenet:
+    batch_size: 128
     lr: 0.0001
     inpu_dim: 128
     hidden_dim: 128
@@ -170,6 +176,7 @@ los_prediction:
     level: 2
 
   grasp:
+    batch_size: 128
     lr: 0.0005
     start_embed_dim: 64
     cluster_num: 12
@@ -177,6 +184,7 @@ los_prediction:
     block: ConCare
 
   graphcare:
+    batch_size: 128
     lr: 0.0001
     start_embed_dim: 128
     hidden_dim: 128
