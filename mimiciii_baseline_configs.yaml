@@ -256,8 +256,8 @@ drug_recommendation:
     start_embed_dim: 128
     hidden_dim: 128
     gnn: BAT
-    gnn_layer: 3
-    decay_rate: 0.01
+    gnn_layer: 1
+    decay_rate: 0.001
     patient_mode: joint
     use_alpha: True
     use_beta: True
