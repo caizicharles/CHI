@@ -277,11 +277,28 @@ phenotype_prediction:
   transformer:
 
   deepr:
+    batch_size: 128
+    lr: 0.001
+    start_embed_dim: 128
+    hidden_dim: 128
+    window_size: 2
 
   adacare:
 
   stagenet:
+    batch_size: 128
+    lr: 0.0001
+    inpu_dim: 128
+    hidden_dim: 128
+    conv_size: 2
+    level: 2
 
   grasp:
+    batch_size: 128
+    lr: 0.001
+    start_embed_dim: 64
+    cluster_num: 12
+    hidden_dim: 64
+    block: ConCare
 
   graphcare:
