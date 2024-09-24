@@ -201,12 +201,14 @@ los_prediction:
 ##################################
 drug_recommendation:
   gru:
+    batch_size: 128
     lr: 0.001
     input_dim: 128
     hidden_dim: 128
     layers: 1
 
   transformer:
+    batch_size: 128
     lr: 0.00005
     input_dim: 64
     ff_dim: 64
@@ -215,6 +217,7 @@ drug_recommendation:
     decoder_depth: 1
 
   deepr:
+    batch_size: 128
     lr: 0.001
     max_weeks_between: 630
     start_embed_dim: 128
@@ -233,6 +236,7 @@ drug_recommendation:
     activation: sigmoid
 
   stagenet:
+    batch_size: 128
     lr: 0.0001
     inpu_dim: 128
     hidden_dim: 128
@@ -265,15 +269,67 @@ drug_recommendation:
 ##################################
 phenotype_prediction:
   gru:
+    batch_size: 128
+    lr: 0.001
+    input_dim: 128
+    hidden_dim: 128
+    layers: 3
 
   transformer:
+    batch_size: 128
+    lr: 0.0001
+    input_dim: 64
+    ff_dim: 64
+    head_num: 2
+    encoder_depth: 1
+    decoder_depth: 1
 
   deepr:
+    batch_size: 128
+    lr: 0.0001
+    max_weeks_between: 630
+    start_embed_dim: 128
+    hidden_dim: 128
+    window_size: 1
 
   adacare:
+    batch_size: 128
+    lr: 0.0001
+    input_dim: 64
+    hidden_dim: 64
+    kernel_size: 4
+    kernel_num: 64
+    r_v: 4
+    r_c: 4
+    activation: sigmoid
 
   stagenet:
+    batch_size: 128
+    lr: 0.0001
+    inpu_dim: 128
+    hidden_dim: 128
+    conv_size: 4
+    level: 1
 
   grasp:
+    batch_size: 128
+    lr: 0.001
+    start_embed_dim: 64
+    cluster_num: 12
+    hidden_dim: 64
+    block: ConCare
 
   graphcare:
+    batch_size: 256
+    lr: 0.001
+    start_embed_dim: 128
+    hidden_dim: 128
+    gnn: BAT
+    gnn_layer: 1
+    decay_rate: 0.01
+    patient_mode: joint
+    use_alpha: True
+    use_beta: True
+    edge_attn: True
+    attn_init: 1
+    dropout: 0.5
