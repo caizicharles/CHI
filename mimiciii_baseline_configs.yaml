@@ -245,9 +245,9 @@ drug_recommendation:
   grasp:
     batch_size: 256
     lr: 0.0005
-    start_embed_dim: 64
+    start_embed_dim: 128
     cluster_num: 12
-    hidden_dim: 64
+    hidden_dim: 128
     block: ConCare
 
   graphcare:
