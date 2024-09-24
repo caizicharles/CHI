@@ -268,6 +268,11 @@ drug_recommendation:
 ##################################
 phenotype_prediction:
   gru:
+    batch_size: 128
+    lr: 0.001
+    input_dim: 128
+    hidden_dim: 128
+    layers: 3
 
   transformer:
 
