@@ -23,7 +23,7 @@ mortality_prediction:
     max_weeks_between: 630
     start_embed_dim: 256
     hidden_dim: 256
-    window_size: 2
+    window_size: 1
 
   adacare:
     batch_size: 128
@@ -221,7 +221,7 @@ drug_recommendation:
     max_weeks_between: 630
     start_embed_dim: 128
     hidden_dim: 128
-    window_size: 3
+    window_size: 2
 
   adacare:
     batch_size: 256
