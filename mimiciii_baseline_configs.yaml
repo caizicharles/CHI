@@ -269,7 +269,7 @@ drug_recommendation:
 phenotype_prediction:
   gru:
     batch_size: 128
-    lr: 0.001
+    lr: 0.0001
     input_dim: 128
     hidden_dim: 128
     layers: 3
@@ -284,6 +284,15 @@ phenotype_prediction:
     window_size: 2
 
   adacare:
+    batch_size: 256
+    lr: 0.001
+    input_dim: 64
+    hidden_dim: 64
+    kernel_size: 4
+    kernel_num: 64
+    r_v: 4
+    r_c: 4
+    activation: sigmoid
 
   stagenet:
     batch_size: 128
@@ -302,3 +311,16 @@ phenotype_prediction:
     block: ConCare
 
   graphcare:
+    batch_size: 256
+    lr: 0.001
+    start_embed_dim: 64
+    hidden_dim: 64
+    gnn: BAT
+    gnn_layer: 1
+    decay_rate: 0.001
+    patient_mode: joint
+    use_alpha: True
+    use_beta: True
+    edge_attn: True
+    attn_init: 1
+    dropout: 0.5
