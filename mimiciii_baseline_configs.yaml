@@ -292,7 +292,7 @@ phenotype_prediction:
 
   adacare:
     batch_size: 256
-    lr: 0.001
+    lr: 0.0001
     input_dim: 64
     hidden_dim: 64
     kernel_size: 4
