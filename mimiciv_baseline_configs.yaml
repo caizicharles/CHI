@@ -271,8 +271,8 @@ phenotype_prediction:
   gru:
     batch_size: 128
     lr: 0.001
-    input_dim: 128
-    hidden_dim: 128
+    input_dim: 64
+    hidden_dim: 64
     layers: 3
 
   transformer:
@@ -288,8 +288,8 @@ phenotype_prediction:
     batch_size: 128
     lr: 0.0001
     max_weeks_between: 630
-    start_embed_dim: 128
-    hidden_dim: 128
+    start_embed_dim: 64
+    hidden_dim: 64
     window_size: 1
 
   adacare:
