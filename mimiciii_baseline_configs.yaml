@@ -275,6 +275,13 @@ phenotype_prediction:
     layers: 3
 
   transformer:
+    batch_size: 128
+    lr: 0.001
+    input_dim: 64
+    ff_dim: 64
+    head_num: 2
+    encoder_depth: 1
+    decoder_depth: 1
 
   deepr:
     batch_size: 128
