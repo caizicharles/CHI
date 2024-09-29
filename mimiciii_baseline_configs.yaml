@@ -68,8 +68,8 @@ readmission_prediction:
   gru:
     batch_size: 512
     lr: 0.0001
-    input_dim: 128
-    hidden_dim: 128
+    input_dim: 64
+    hidden_dim: 64
     layers: 3
 
   transformer:
@@ -85,15 +85,15 @@ readmission_prediction:
     batch_size: 512
     lr: 0.0001
     max_weeks_between: 630
-    start_embed_dim: 128
-    hidden_dim: 128
+    start_embed_dim: 64
+    hidden_dim: 64
     window_size: 2
 
   adacare:
     batch_size: 512
     lr: 0.0001
-    input_dim: 128
-    hidden_dim: 128
+    input_dim: 64
+    hidden_dim: 64
     kernel_size: 4
     kernel_num: 64
     r_v: 4
@@ -103,8 +103,8 @@ readmission_prediction:
   stagenet:
     batch_size: 512
     lr: 0.0001
-    input_dim: 128
-    hidden_dim: 128
+    input_dim: 64
+    hidden_dim: 64
     conv_size: 2
     levels: 2
 
@@ -119,8 +119,8 @@ readmission_prediction:
   graphcare:
     batch_size: 512
     lr: 0.0001
-    start_embed_dim: 128
-    hidden_dim: 128
+    start_embed_dim: 64
+    hidden_dim: 64
     gnn: BAT
     gnn_layer: 1
     decay_rate: 0.001
@@ -134,13 +134,13 @@ los_prediction:
   gru:
     batch_size: 512
     lr: 0.0001
-    input_dim: 128
-    hidden_dim: 128
+    input_dim: 64
+    hidden_dim: 64
     layers: 3
 
   transformer:
     batch_size: 512
-    lr: 0.00001
+    lr: 0.0001
     input_dim: 64
     ff_dim: 64
     head_num: 2
@@ -150,8 +150,8 @@ los_prediction:
   deepr:
     batch_size: 512
     lr: 0.0001
-    start_embed_dim: 128
-    hidden_dim: 128
+    start_embed_dim: 64
+    hidden_dim: 64
     window_size: 2
 
   adacare:
