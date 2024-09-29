@@ -1,14 +1,14 @@
 ##################################
 mortality_prediction:
   gru:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     input_dim: 128
     hidden_dim: 128
     layers: 1
 
   transformer:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     start_embed_dim: 64
     input_dim: 64
@@ -18,7 +18,7 @@ mortality_prediction:
     decoder_depth: 1
 
   deepr:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     max_weeks_between: 630
     start_embed_dim: 256
@@ -26,7 +26,7 @@ mortality_prediction:
     window_size: 1
 
   adacare:
-    batch_size: 128
+    batch_size: 512
     lr: 0.00001
     input_dim: 128
     hidden_dim: 128
@@ -37,7 +37,7 @@ mortality_prediction:
     activation: sigmoid
 
   stagenet:
-    batch_size: 128
+    batch_size: 512
     lr: 0.00001
     input_dim: 128
     hidden_dim: 128
@@ -45,7 +45,7 @@ mortality_prediction:
     levels: 1
 
   grasp:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     start_embed_dim: 128
     cluster_num: 12
@@ -53,7 +53,7 @@ mortality_prediction:
     block: ConCare
 
   graphcare:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     start_embed_dim: 128
     hidden_dim: 128
@@ -68,14 +68,14 @@ mortality_prediction:
 ##################################
 readmission_prediction:
   gru:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     input_dim: 128
     hidden_dim: 128
     layers: 3
 
   transformer:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     input_dim: 64
     ff_dim: 64
@@ -84,7 +84,7 @@ readmission_prediction:
     decoder_depth: 1
 
   deepr:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     max_weeks_between: 630
     start_embed_dim: 128
@@ -92,7 +92,7 @@ readmission_prediction:
     window_size: 2
 
   adacare:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     input_dim: 128
     hidden_dim: 128
@@ -103,7 +103,7 @@ readmission_prediction:
     activation: sigmoid
 
   stagenet:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     input_dim: 128
     hidden_dim: 128
@@ -111,7 +111,7 @@ readmission_prediction:
     levels: 2
 
   grasp:
-    batch_size: 128
+    batch_size: 512
     lr: 0.00001
     start_embed_dim: 64
     cluster_num: 12
@@ -119,7 +119,7 @@ readmission_prediction:
     block: ConCare
 
   graphcare:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     start_embed_dim: 128
     hidden_dim: 128
@@ -134,14 +134,14 @@ readmission_prediction:
 ##################################
 los_prediction:
   gru:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     input_dim: 128
     hidden_dim: 128
     layers: 3
 
   transformer:
-    batch_size: 128
+    batch_size: 512
     lr: 0.00001
     input_dim: 64
     ff_dim: 64
@@ -150,7 +150,7 @@ los_prediction:
     decoder_depth: 1
 
   deepr:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     start_embed_dim: 128
     hidden_dim: 128
@@ -168,7 +168,7 @@ los_prediction:
     activation: sigmoid
 
   stagenet:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     inpu_dim: 128
     hidden_dim: 128
@@ -176,7 +176,7 @@ los_prediction:
     level: 2
 
   grasp:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     start_embed_dim: 128
     cluster_num: 12
@@ -184,7 +184,7 @@ los_prediction:
     block: ConCare
 
   graphcare:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     start_embed_dim: 128
     hidden_dim: 128
@@ -201,13 +201,14 @@ los_prediction:
 ##################################
 drug_recommendation:
   gru:
-    batch_size: 128
+    batch_size: 512
     lr: 0.001
     input_dim: 128
     hidden_dim: 128
     layers: 1
 
   transformer:
+    batch_size: 512
     lr: 0.00005
     input_dim: 64
     ff_dim: 64
@@ -216,7 +217,7 @@ drug_recommendation:
     decoder_depth: 1
 
   deepr:
-    batch_size: 128
+    batch_size: 512
     lr: 0.001
     max_weeks_between: 630
     start_embed_dim: 128
@@ -224,7 +225,7 @@ drug_recommendation:
     window_size: 2
 
   adacare:
-    batch_size: 256
+    batch_size: 512
     lr: 0.001
     input_dim: 128
     hidden_dim: 128
@@ -235,7 +236,7 @@ drug_recommendation:
     activation: sigmoid
 
   stagenet:
-    batch_size: 128
+    batch_size: 512
     lr: 0.001
     inpu_dim: 128
     hidden_dim: 128
@@ -243,7 +244,7 @@ drug_recommendation:
     level: 2
 
   grasp:
-    batch_size: 256
+    batch_size: 512
     lr: 0.0005
     start_embed_dim: 128
     cluster_num: 12
@@ -251,7 +252,7 @@ drug_recommendation:
     block: ConCare
 
   graphcare:
-    batch_size: 256
+    batch_size: 512
     lr: 0.001
     start_embed_dim: 128
     hidden_dim: 128
@@ -268,14 +269,14 @@ drug_recommendation:
 ##################################
 phenotype_prediction:
   gru:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     input_dim: 128
     hidden_dim: 128
     layers: 3
 
   transformer:
-    batch_size: 256
+    batch_size: 512
     lr: 0.0001
     input_dim: 64
     ff_dim: 64
@@ -284,14 +285,14 @@ phenotype_prediction:
     decoder_depth: 1
 
   deepr:
-    batch_size: 128
+    batch_size: 512
     lr: 0.001
     start_embed_dim: 128
     hidden_dim: 128
     window_size: 2
 
   adacare:
-    batch_size: 256
+    batch_size: 512
     lr: 0.0001
     input_dim: 64
     hidden_dim: 64
@@ -302,7 +303,7 @@ phenotype_prediction:
     activation: sigmoid
 
   stagenet:
-    batch_size: 128
+    batch_size: 512
     lr: 0.0001
     inpu_dim: 128
     hidden_dim: 128
@@ -310,7 +311,7 @@ phenotype_prediction:
     level: 2
 
   grasp:
-    batch_size: 128
+    batch_size: 512
     lr: 0.001
     start_embed_dim: 64
     cluster_num: 12
@@ -318,7 +319,7 @@ phenotype_prediction:
     block: ConCare
 
   graphcare:
-    batch_size: 256
+    batch_size: 512
     lr: 0.001
     start_embed_dim: 64
     hidden_dim: 64
