@@ -1,1 +1,1 @@
-# PROTOEHR: Hierarchical Prototype Learning for EHR-Based Healthcare Predictions
+# ProtoEHR: Hierarchical Prototype Learning for EHR-Based Healthcare Predictions
