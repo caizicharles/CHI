@@ -1,1 +1,1 @@
-# Multi-level Prototypical Network for Interpretable Healthcare Predictions
+# PROTOEHR: Hierarchical Prototype Learning for EHR-Based Healthcare Predictions
