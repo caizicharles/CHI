@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from torch_geometric.nn import GATConv, GINConv, global_mean_pool
 
-from .modules_1 import CompGCNConv, PrototypeLearning, PrototypePrediction,\
+from .modules import CompGCNConv, PrototypeLearning, PrototypePrediction,\
     BiAttentionGNNConv, \
     TimeGapEmbedding, \
     TransformerTime, Aggregator
