@@ -46,7 +46,6 @@ def load_all(processed_data_path: str, dataset_name: str, triplet_method: str, t
     prescriptions_map = read_csv_file(processed_data_path, 'prescriptions_code.csv')
     phenotype_names = read_pickle_file(processed_data_path, 'ccs_phenotypes.pickle')
 
-    # filtered_patients = read_pickle_file(processed_data_path, f'{dataset_name}_filtered.pickle')
     full_graph = read_pickle_file(processed_data_path, f'{dataset_name}_{triplet_method}_graph_pr1.0.pickle')
 
     if task == 'mortality_prediction':
@@ -72,7 +71,6 @@ def load_all(processed_data_path: str, dataset_name: str, triplet_method: str, t
         'procedures_map': procedures_map,
         'prescriptions_map': prescriptions_map,
         'phenotype_names': phenotype_names,
-        # 'filtered_patients': filtered_patients,
         'train_dataset': train_dataset,
         'val_dataset': val_dataset,
         'test_dataset': test_dataset,
@@ -80,12 +78,9 @@ def load_all(processed_data_path: str, dataset_name: str, triplet_method: str, t
     }
 
 
-def task_configuring_model(task, node_id_to_name, prescriptions):
+def task_configuring_model(task, prescriptions):
 
-    if task == 'pretrain':
-        out_dim = len(node_id_to_name) + 1
-
-    elif task == 'mortality_prediction' or task == 'readmission_prediction':
+    if task == 'mortality_prediction' or task == 'readmission_prediction':
         out_dim = 1
 
     elif task == 'los_prediction':
@@ -101,7 +96,7 @@ def task_configuring_model(task, node_id_to_name, prescriptions):
 
 
 def main(args):
-    init_logger(args)
+    init_logger()
     logger.info(f'Process begins...')
     logger.info(f'Dataset: {args.dataset}')
     logger.info(f'Task: {args.task}')
@@ -167,7 +162,7 @@ def main(args):
         all_test_loader.append(sub_test_loader)
     logger.info('Dataloader ready')
 
-    out_dim = task_configuring_model(args.task, file_lib['node_id_to_name'], prescriptions_maps[0])
+    out_dim = task_configuring_model(args.task, prescriptions_maps[0])
 
     global_iter_idx = [0]
     start_epoch = 0
