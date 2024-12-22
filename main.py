@@ -1,29 +1,30 @@
+import time
 import random
 import logging
+from tqdm import tqdm
+from copy import deepcopy
 import numpy as np
 import torch
 import torch.nn.functional as F
-from tqdm import tqdm
-from copy import deepcopy
-import tensorboardX
+import mlflow
+from mlflow.tracking import MlflowClient
 
-from utils.misc import init_logger, save_params, save_embed, save_prototype
-from utils.args import get_args
-from utils.utils import *
-from dataset.dataset import MIMICIVBaseDataset, split_by_patient
+from dataset.dataset import MIMICBaseDataset
 from dataloader.dataloader import DataLoader
-from model.model import MODELS
+from model.model_1 import MODELS
 from trainer.optimizer import OPTIMIZERS
 from trainer.scheduler import SCHEDULERS
 from trainer.criterion import CRITERIONS
 from metrics.metrics import METRICS
+from utils.misc import init_logger, save_params, save_embed, save_prototype
+from utils.args import get_args
+from utils.utils import *
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 logger = logging.getLogger()
 
 
 def seed_everything(seed: int):
-
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -35,25 +36,34 @@ def seed_everything(seed: int):
 
 
 def load_all(processed_data_path: str, dataset_name: str, triplet_method: str, task: str):
-
     processed_data_path = osp.join(processed_data_path, dataset_name)
 
     node_id_to_name = read_pickle_file(processed_data_path, f'{dataset_name}_node_id_to_name.pickle')
     triplet_id_to_info = read_pickle_file(processed_data_path,
-                                          f'{dataset_name}_{triplet_method}_triplet_id_to_info.pickle')
+                                          f'{dataset_name}_{triplet_method}_triplet_id_to_info_pr1.0.pickle')
     diagnoses_map = read_csv_file(processed_data_path, 'diagnoses_code.csv')
     procedures_map = read_csv_file(processed_data_path, 'procedures_code.csv')
     prescriptions_map = read_csv_file(processed_data_path, 'prescriptions_code.csv')
+    phenotype_names = read_pickle_file(processed_data_path, 'ccs_phenotypes.pickle')
 
-    filtered_patients = read_pickle_file(processed_data_path, f'{dataset_name}_filtered.pickle')
-    full_graph = read_pickle_file(processed_data_path, f'{dataset_name}_{triplet_method}_graph.pickle')
+    # filtered_patients = read_pickle_file(processed_data_path, f'{dataset_name}_filtered.pickle')
+    full_graph = read_pickle_file(processed_data_path, f'{dataset_name}_{triplet_method}_graph_pr1.0.pickle')
 
-    if task == 'pretrain':
-        full_dataset = read_pickle_file(processed_data_path, f'{dataset_name}_{triplet_method}_padded_pretrain.pickle')
+    if task == 'mortality_prediction':
+        suffix = 'M'
+    elif task == 'readmission_prediction':
+        suffix = 'R'
+    elif task == 'los_prediction':
+        suffix = 'LOS'
     elif task == 'drug_recommendation':
-        full_dataset = read_pickle_file(processed_data_path, f'{dataset_name}_{triplet_method}_padded_DR.pickle')
-    else:
-        full_dataset = read_pickle_file(processed_data_path, f'{dataset_name}_{triplet_method}_padded.pickle')
+        suffix = 'DR'
+    elif task == 'phenotype_prediction':
+        suffix = 'PH'
+
+    train_dataset = read_pickle_file(processed_data_path,
+                                     f'{dataset_name}_{triplet_method}_padded_train_{suffix}.pickle')
+    val_dataset = read_pickle_file(processed_data_path, f'{dataset_name}_{triplet_method}_padded_val_{suffix}.pickle')
+    test_dataset = read_pickle_file(processed_data_path, f'{dataset_name}_{triplet_method}_padded_test_{suffix}.pickle')
 
     return {
         'node_id_to_name': node_id_to_name,
@@ -61,39 +71,39 @@ def load_all(processed_data_path: str, dataset_name: str, triplet_method: str, t
         'diagnoses_map': diagnoses_map,
         'procedures_map': procedures_map,
         'prescriptions_map': prescriptions_map,
-        'filtered_patients': filtered_patients,
-        'full_dataset': full_dataset,
+        'phenotype_names': phenotype_names,
+        # 'filtered_patients': filtered_patients,
+        'train_dataset': train_dataset,
+        'val_dataset': val_dataset,
+        'test_dataset': test_dataset,
         'full_graph': full_graph
     }
 
 
-def task_configuring_model(args, node_id_to_name, prescriptions):
+def task_configuring_model(task, node_id_to_name, prescriptions):
 
-    task = args.task
+    if task == 'pretrain':
+        out_dim = len(node_id_to_name) + 1
 
-    if task == 'mortality_prediction' or task == 'readmission_prediction':
+    elif task == 'mortality_prediction' or task == 'readmission_prediction':
         out_dim = 1
-        class_num = 2
-
-    elif task == 'drug_recommendation':
-        out_dim = len(prescriptions)
-        class_num = len(prescriptions)
 
     elif task == 'los_prediction':
         out_dim = 10
-        class_num = 10
 
-    elif task == 'pretrain':
-        out_dim = len(node_id_to_name) + 1
-        class_num = len(node_id_to_name) + 1
+    elif task == 'drug_recommendation':
+        out_dim = len(prescriptions) + 1
 
-    return out_dim, class_num
+    elif task == 'phenotype_prediction':
+        out_dim = 25 + 1
+
+    return out_dim
 
 
 def main(args):
-
-    writer = init_logger(args)
+    init_logger(args)
     logger.info(f'Process begins...')
+    logger.info(f'Dataset: {args.dataset}')
     logger.info(f'Task: {args.task}')
     logger.info(f'Triplet method: {args.triplet_method}')
     logger.info(f'Model: {args.model["name"]}')
@@ -101,30 +111,22 @@ def main(args):
     seed_everything(args.seed)
 
     file_lib = load_all(args.processed_data_path, args.dataset, args.triplet_method, args.task)
+    prescriptions_maps = format_code_map(file_lib['prescriptions_map'])
+    train_dataset = file_lib['train_dataset']
+    val_dataset = file_lib['val_dataset']
+    test_dataset = file_lib['test_dataset']
     logger.info('Completed file loading')
 
-    diagnoses_maps = format_code_map(file_lib['diagnoses_map'])
-    procedures_maps = format_code_map(file_lib['procedures_map'])
-    prescriptions_maps = format_code_map(file_lib['prescriptions_map'])
-
-    ratio = [args.train_proportion, args.val_proportion, args.test_proportion]
-    train_patients, val_patients, test_patients = split_by_patient(file_lib['full_dataset'], ratio)
-
-    train_dataset = MIMICIVBaseDataset(patients=train_patients,
-                                       filtered_patients=file_lib['filtered_patients'],
-                                       task=args.task,
-                                       graph=file_lib['full_graph'],
-                                       prescriptions_code_to_name=prescriptions_maps[0])
-    val_dataset = MIMICIVBaseDataset(patients=val_patients,
-                                     filtered_patients=file_lib['filtered_patients'],
+    train_dataset = MIMICBaseDataset(patients=train_dataset,
                                      task=args.task,
                                      graph=file_lib['full_graph'],
-                                     prescriptions_code_to_name=prescriptions_maps[0])
-    test_dataset = MIMICIVBaseDataset(patients=test_patients,
-                                      filtered_patients=file_lib['filtered_patients'],
-                                      task=args.task,
-                                      graph=file_lib['full_graph'],
-                                      prescriptions_code_to_name=prescriptions_maps[0])
+                                     prescriptions_code_to_name=prescriptions_maps[0],
+                                     phenotype_names=file_lib['phenotype_names'])
+    val_dataset = MIMICBaseDataset(patients=val_dataset,
+                                   task=args.task,
+                                   graph=file_lib['full_graph'],
+                                   prescriptions_code_to_name=prescriptions_maps[0],
+                                   phenotype_names=file_lib['phenotype_names'])
     logger.info('Dataset ready')
 
     train_loader = DataLoader(dataset=train_dataset,
@@ -139,19 +141,36 @@ def main(args):
                             task=args.task,
                             batch_size=args.val_batch_size,
                             shuffle=False)
-    test_loader = DataLoader(dataset=test_dataset,
-                             graph=file_lib['full_graph'],
-                             model_name=args.model['name'],
-                             task=args.task,
-                             batch_size=args.test_batch_size,
-                             shuffle=False)
-    logger.info('DataLoader ready')
+    
+    all_test_loader = []
+    test_keys = np.array(list(test_dataset.keys()))
+    for idx in range(args.bootstrap_num):
+        random.seed(idx)
+        np.random.seed(idx)
+        sample_indices = np.random.choice(len(test_dataset), len(test_dataset), replace=True)
+        sample_keys = test_keys[sample_indices]
 
-    out_dim, class_num = task_configuring_model(args, file_lib['node_id_to_name'], prescriptions_maps[0])
+        sub_test_dataset = {sample_pos: test_dataset[key] for sample_pos, key in enumerate(sample_keys)}
+        sub_test_dataset = MIMICBaseDataset(patients=sub_test_dataset,
+                                   task=args.task,
+                                   graph=file_lib['full_graph'],
+                                   prescriptions_code_to_name=prescriptions_maps[0],
+                                   phenotype_names=file_lib['phenotype_names'])
 
-    multi_level_embed = None
-    if args.model['load_embed']:
-        multi_level_embed = torch.load(args.model['load_embed'])['embed']
+        sub_test_loader = DataLoader(dataset=sub_test_dataset,
+                                graph=file_lib['full_graph'],
+                                model_name=args.model['name'],
+                                task=args.task,
+                                batch_size=args.test_batch_size,
+                                shuffle=False)
+        
+        all_test_loader.append(sub_test_loader)
+    logger.info('Dataloader ready')
+
+    out_dim = task_configuring_model(args.task, file_lib['node_id_to_name'], prescriptions_maps[0])
+
+    global_iter_idx = [0]
+    start_epoch = 0
 
     model_configs = args.model['args'] | {
         'device': device,
@@ -160,151 +179,154 @@ def main(args):
         'visit_thresh': args.visit_thresh,
         'visit_code_num': args.code_thresh,
         'out_dim': out_dim,
-        'class_num': class_num,
-        'global_node_attr': file_lib['full_graph'].x,
-        'global_edge_attr': file_lib['full_graph'].edge_attr,
-        'global_edge_index': file_lib['full_graph'].edge_index,
-        'global_edge_ids': file_lib['full_graph'].edge_ids,
-        'multi_level_embed': multi_level_embed
+        'graph': file_lib['full_graph']['graph'],
+        'global_node_attr': file_lib['full_graph']['h'],
+        'global_edge_attr': file_lib['full_graph']['edge_attr'],
+        'global_edge_index': file_lib['full_graph']['edge_index'],
+        'global_edge_ids': file_lib['full_graph']['edge_ids'],
+        'global_edge_type': file_lib['full_graph']['type'],
+        'global_edge_norm': file_lib['full_graph']['norm'],
     }
     model = MODELS[args.model['name']](model_configs)
     model.to(device)
+    logger.info('Model ready')
 
-    if args.pretrained:
-        logger.info(f"Load pretrained model from {args.pretrained}")
-        ckpt = torch.load(args.pretrained, map_location=device)
-        model.load_state_dict(ckpt['model'], strict=False)
-
-    if args.model['freeze']:
-        for param in model.gnn.parameters():
-            param.requires_grad = False
-        for param in model.set_transformer.parameters():
-            param.requires_grad = False
-        for param in model.gru.parameters():
-            param.requires_grad = False
-
-    optimizer = OPTIMIZERS[args.optimizer['name']](filter(lambda p: p.requires_grad, model.parameters()),
-                                                   **args.optimizer['args'])
-
+    optimizer = OPTIMIZERS[args.optimizer['name']](model.parameters(), **args.optimizer['args'])
     scheduler = None
     if args.scheduler is not None:
         scheduler = SCHEDULERS[args.scheduler['name']](optimizer, **args.scheduler['args'])
+    logger.info('Optimizer and Scheduler ready')
 
-    global_iter_idx = [0]
-    start_epoch = 0
+    experiment_name = f'Experiments_{args.model["name"]}'
+    mlflow.set_tracking_uri(osp.join(args.log_path, 'mlflow'))
+    client = MlflowClient()
+    try:
+        EXP_ID = client.create_experiment(experiment_name)
+    except:
+        experiments = client.get_experiment_by_name(experiment_name)
+        EXP_ID = experiments.experiment_id
 
-    if args.pretrained:
-        if ckpt['optimizer'] is not None:
-            optimizer.load_state_dict({'state': ckpt['optimizer']['state'], 'param_groups': optimizer.param_groups})
-        if ckpt['scheduler'] is not None:
-            scheduler.load_state_dict({'state': ckpt['scheduler']['state'], 'param_groups': scheduler.param_groups})
-        if ckpt['iter'] is not None:
-            global_iter_idx[0] = ckpt['iter']
-        if ckpt['epoch'] is not None:
-            start_epoch = ckpt['epoch'] + 1
+    with mlflow.start_run(experiment_id=EXP_ID,
+                          run_name=f'{args.dataset}_{args.task}_{args.model["name"]}_{args.model["mode"]}_{args.start_time}_pr1.0'):
+        mlflow.log_params(vars(args))
+        model_param_num = sum(p.numel() for p in model.parameters())
+        model_size = sum(p.numel() * p.element_size() for p in model.parameters()) / 1e6
+        mlflow.log_metric('model_param_num', model_param_num)
+        mlflow.log_metric('model_size_mb', model_size)
 
-    logger.info('Model ready')
+        if args.model['mode'] == 'train':
+            early_stopping_counter = 0
+            best_score = 0.
 
-    if args.model['mode'] == 'train':
-        early_stopping_counter = 0
-        best_score = 0.
+            bootstrap_test_results = {}
+            bootstrap_test_result_stats = {}
+            for metric_name in args.test_metrics:
+                bootstrap_test_results[metric_name] = []
+                bootstrap_test_result_stats['bootstrap_test_stats_' + metric_name] = {'mean': None, 'std': None, 'num': None}
 
-        for epoch_idx in range(start_epoch, args.max_epoch):
-            # Train
-            embed_all, label_all, attn_mask_all = single_train(
-                model,
-                args.model['model_type'],
-                args.task,
-                train_loader,
-                epoch_idx,
-                global_iter_idx,
-                optimizer,
-                criterions=[CRITERIONS[criterion](**args.criterion[criterion]) for criterion in args.criterion],
-                metrics=[METRICS[metric](args.task) for metric in args.metrics],
-                scheduler=scheduler,
-                logging_freq=args.logging_freq,
-                writer=writer)
-
-            # Validate
-            if epoch_idx % args.val_freq == 0 or epoch_idx == args.max_epoch - 1:
-                results, val_embed_all, val_label_all, val_attn_mask_all = single_validate(
+            for epoch_idx in range(start_epoch, args.max_epoch):
+                single_train(
                     model,
-                    args.model['model_type'],
                     args.task,
-                    val_loader,
+                    train_loader,
                     epoch_idx,
                     global_iter_idx,
+                    optimizer,
                     criterions=[CRITERIONS[criterion](**args.criterion[criterion]) for criterion in args.criterion],
-                    metrics=[METRICS[metric](args.task) for metric in args.metrics],
-                    writer=writer)
+                    metrics=[METRICS[metric](args.task, **args.val_metrics[metric]) for metric in args.val_metrics],
+                    scheduler=scheduler,
+                    logging_freq=args.logging_freq)
 
-                if args.task != 'pretrain':
+                if epoch_idx % args.val_freq == 0 or epoch_idx == args.max_epoch - 1:
+                    val_results = single_validate(
+                        model,
+                        args.task,
+                        val_loader,
+                        epoch_idx,
+                        global_iter_idx,
+                        criterions=[CRITERIONS[criterion](**args.criterion[criterion]) for criterion in args.criterion],
+                        metrics=[METRICS[metric](args.task, **args.val_metrics[metric]) for metric in args.val_metrics])
+
                     # Early Stopping
-                    score = results[args.early_stopping_indicator]
+                    score = val_results[args.early_stopping_indicator]
+
                     if score >= best_score:
                         best_model = deepcopy(model)
                         best_optimizer = deepcopy(optimizer)
                         best_scheduler = deepcopy(scheduler)
                         best_score = score
-                        best_results = results
+                        best_val_results = val_results
                         best_epoch = epoch_idx
                         best_iter = global_iter_idx[0]
-                        best_embed = embed_all
                         early_stopping_counter = 0
-
-                        if epoch_idx == args.max_epoch - 1:
-                            early_stopping_counter = args.early_stopping_threshold
 
                     else:
                         early_stopping_counter += 1
 
                     if early_stopping_counter >= args.early_stopping_threshold:
-                        logger.info(f'Early stopping triggered, best epoch: {best_epoch}')
-                        for k, v in best_results.items():
-                            logger.info(f'Best {k}: {v:.4f}')
-
-                        if args.save_params:
-                            save_params(model=best_model,
-                                        args=args,
-                                        epoch_idx=best_epoch,
-                                        iter_idx=best_iter,
-                                        optimizer=best_optimizer,
-                                        scheduler=best_scheduler)
-
-                        if args.model['save_embed']:
-                            save_embed(embed=best_embed, args=args)
-
-                        logger.info('Process completed')
+                        break
+                    elif epoch_idx == args.max_epoch - 1:
+                        logger.info(f'Max epoch reached, best epoch is last epoch: {epoch_idx}')
                         break
 
-        if args.task == 'pretrain':
+            for bootstrap_idx, test_loader in enumerate(all_test_loader):
+                test_results = single_test(
+                    model,
+                    args.task,
+                    test_loader,
+                    bootstrap_idx,
+                    metrics=[
+                        METRICS[metric](args.task, **args.test_metrics[metric]) for metric in args.test_metrics
+                    ])
+                
+                for name, result in test_results.items():
+                    bootstrap_test_results[name].append(result.item())
+
+            if early_stopping_counter >= args.early_stopping_threshold:
+                logger.info(f'Early stopping triggered, best epoch: {best_epoch}')
+            elif epoch_idx == args.max_epoch - 1 and early_stopping_counter < args.early_stopping_threshold:
+                logger.info(f'Max epoch reached, best epoch: {best_epoch}')
+
+            for metric_name, bootstrap_vals in bootstrap_test_results.items():
+                bootstrap_vals = 100*np.array(bootstrap_vals)
+                mean = np.round(np.mean(bootstrap_vals), decimals=1)
+                std = np.round(np.std(bootstrap_vals), decimals=1)
+                num = len(bootstrap_vals)
+                bootstrap_test_result_stats['bootstrap_test_stats_' + metric_name]['mean'] = mean.item()
+                bootstrap_test_result_stats['bootstrap_test_stats_' + metric_name]['std'] = std.item()
+                bootstrap_test_result_stats['bootstrap_test_stats_' + metric_name]['num'] = num
+                logger.info(f'Bootstrap {metric_name} mean: {mean} std: {std} num: {num}')
+
+            mlflow.log_params(bootstrap_test_result_stats)
+
+            if args.save_test:
+                bootstrap_results_path = osp.join(args.log_path, 'bootstrap_results', args.dataset, args.task,
+                                            args.model['name'])
+                save_with_pickle(bootstrap_test_results, bootstrap_results_path, f'{args.dataset}_{args.task}_{args.model["name"]}_bootstrap_results_{args.start_time}.pickle')
+                save_with_pickle(bootstrap_test_result_stats, bootstrap_results_path, f'{args.dataset}_{args.task}_{args.model["name"]}_bootstrap_result_stats_{args.start_time}.pickle')
+
             if args.save_params:
-                save_params(model=deepcopy(model),
+                save_params(model=best_model,
                             args=args,
-                            epoch_idx=epoch_idx,
-                            iter_idx=global_iter_idx[0],
-                            optimizer=deepcopy(optimizer),
-                            scheduler=deepcopy(scheduler))
+                            epoch_idx=best_epoch,
+                            iter_idx=best_iter,
+                            optimizer=best_optimizer,
+                            scheduler=best_scheduler)
 
-            if args.model['save_embed']:
-                save_embed(embed=embed_all, args=args, type='train')
-                # save_embed(embed=val_embed_all, args=args, type='val')
+            logger.info('Process completed')
 
-    elif args.model['mode'] == 'inference':
-        results = single_validate(
-            model,
-            args.model['model_type'],
-            args.task,
-            val_loader,
-            start_epoch,
-            global_iter_idx,
-            criterions=[CRITERIONS[criterion](**args.criterion[criterion]) for criterion in args.criterion],
-            metrics=[METRICS[metric](args.task) for metric in args.metrics],
-            writer=writer)
+        elif args.model['mode'] == 'inference':
+            test_results = single_test(
+                    model,
+                    args.task,
+                    test_loader,
+                    epoch_idx,
+                    metrics=[
+                        METRICS[metric](args.task, **args.test_metrics[metric]) for metric in args.test_metrics
+                    ])
 
 
 def single_train(model,
-                 model_type,
                  task,
                  dataloader,
                  epoch_idx,
@@ -313,18 +335,15 @@ def single_train(model,
                  criterions=[],
                  metrics=[],
                  scheduler=None,
-                 logging_freq=10,
-                 writer=None):
+                 logging_freq=10):
 
+    train_start_time = time.time()
     model.train()
     epoch_loss = []
     prob_all = []
     target_all = []
-    embed_all = {'patient_embed': [], 'visit_embed': [], 'code_embed': []}
-    attn_mask_all = []
 
     for idx, data in enumerate(dataloader):
-
         data = data.to(device)
         optimizer.zero_grad()
 
@@ -332,94 +351,45 @@ def single_train(model,
             'cat_node_ids': data.cat_node_ids,
             'cat_edge_ids': data.cat_edge_ids,
             'cat_edge_index': data.cat_edge_index,
-            'cat_edge_attr': data.cat_edge_attr,
             'visit_nodes': data.visit_nodes,
             'visit_node_type': data.visit_node_type,
             'ehr_nodes': data.ehr_nodes,
             'batch': data.batch,
-            'batch_patient': data.batch_patient
         }
 
         output = model(node_ids=data.visit_node_ids,
                        edge_idx=data.global_edge_index,
                        edge_attr=data.global_edge_attr,
                        visit_times=data.visit_rel_times,
-                       visit_order=data.visit_order,
                        attn_mask=data.attn_mask,
                        **additional_data)
 
         out = output['logits']
         prototypes = output['prototypes']
-        embeddings = output['embeddings']
-
-        attn_mask_all.append(data.attn_mask.cpu().detach())
 
         loss = 0.
-        if task == 'pretrain':
-            labels_1 = data.set_trans_label
-            labels_2 = data.gru_label
+        labels = data.labels
 
-            visit_mask = data.attn_mask.all(dim=-1)
-            visit_mask = ~visit_mask
-            visit_mask = visit_mask.unsqueeze(-1).expand(-1, -1, labels_1.size(-1))
-
-            labels_1 = labels_1[visit_mask].view(-1, labels_1.size(-1))
-
-            for criterion in criterions:
-                    if criterion.NAME == 'binary_entropy':
-                        loss += criterion(out[0], labels_1)
-                        loss += criterion(out[1], labels_2)
-
-                    elif criterion.NAME == 'contrastive_loss':
-                        loss += criterion(embeddings['visit_embed'], data.attn_mask)
-
-            metric_out = out[1]
-            metric_labels = labels_2
-
-        else:
-            labels = data.labels
-        
-            # Main Model Finetune
-            if model_type == 'base':
-                for criterion in criterions:
-                    if criterion.TYPE == 'prototype':
-                        visit_prototypes = prototypes['visit_prototypes']
-                        patient_prototypes = prototypes['patient_prototypes']
-                        loss += criterion([visit_prototypes, patient_prototypes])
-
-                    else:
-                        loss += criterion(out[0], labels)
-            # Baselines
-            else:
-                for criterion in criterions:
-                    loss += criterion(out[0], labels)
-
-            metric_out = out[0]
-            metric_labels = labels
+        for criterion in criterions:
+            loss += criterion(out[0], labels)
 
         epoch_loss.append(loss.item())
         loss.backward()
         optimizer.step()
 
         if task == 'los_prediction':
-            probability = F.softmax(metric_out, dim=-1)
+            probability = F.softmax(out[0], dim=-1)
         else:
-            probability = torch.sigmoid(metric_out)
+            probability = torch.sigmoid(out[0])
 
         prob_all.append(probability.cpu().detach())
-        target_all.append(metric_labels.cpu().detach())
-
-        if embeddings is not None:
-            for k, v in embeddings.items():
-                if v is not None:
-                    embed_all[k].append(v.cpu().detach())
+        target_all.append(labels.cpu().detach())
 
         if idx % logging_freq == 0:
             logger.info(
                 f"Epoch: {epoch_idx:4d}, Iteration: {idx:4d} / {len(dataloader):4d} [{global_iter_idx[0]:5d}], Loss: {loss.item()}"
             )
-        if writer is not None:
-            writer.add_scalar('train/batch_loss', loss.item(), global_iter_idx[0])
+        mlflow.log_metric(key='train_batch_loss', value=loss.item(), step=global_iter_idx[0])
 
         global_iter_idx[0] += 1
 
@@ -428,37 +398,26 @@ def single_train(model,
 
     epoch_loss_avg = np.mean(epoch_loss)
     logger.info(f"Epoch: {epoch_idx:4d},  [{global_iter_idx[0]:5d}], Epoch Loss: {epoch_loss_avg}")
-    if writer is not None:
-        writer.add_scalar('train/epoch_loss', epoch_loss_avg, epoch_idx)
-
-    label_all = target_all
+    mlflow.log_metrics({
+        'train_epoch_time_seconds': time.time() - train_start_time,
+        'train_epoch_loss': epoch_loss_avg
+    },
+                       step=epoch_idx)
 
     prob_all = np.concatenate(prob_all, axis=0)
     target_all = np.concatenate(target_all, axis=0)
 
     for metric in metrics:
-        score = metric.calculate(prob_all, target_all)
-        metric.log(score, logger, writer=writer, global_iter=global_iter_idx[0], name_prefix='train/')
-
-    return embed_all, label_all, attn_mask_all
+        score = metric.calculate(prob_all, target_all)       
+        mlflow.log_metric(key=f'train_{metric.NAME}', value=score, step=epoch_idx)
 
 
-def single_validate(model,
-                    model_type,
-                    task,
-                    dataloader,
-                    epoch_idx,
-                    global_iter_idx,
-                    criterions=[],
-                    metrics=[],
-                    writer=None):
+def single_validate(model, task, dataloader, epoch_idx, global_iter_idx, criterions=[], metrics=[]):
 
     model.eval()
     epoch_loss = []
     prob_all = []
     target_all = []
-    embed_all = {'patient_embed': [], 'visit_embed': [], 'code_embed': []}
-    attn_mask_all = []
 
     for _, data in enumerate(tqdm(dataloader)):
         data = data.to(device)
@@ -468,29 +427,86 @@ def single_validate(model,
                 'cat_node_ids': data.cat_node_ids,
                 'cat_edge_ids': data.cat_edge_ids,
                 'cat_edge_index': data.cat_edge_index,
-                'cat_edge_attr': data.cat_edge_attr,
                 'visit_nodes': data.visit_nodes,
                 'visit_node_type': data.visit_node_type,
                 'ehr_nodes': data.ehr_nodes,
                 'batch': data.batch,
-                'batch_patient': data.batch_patient
             }
 
             output = model(node_ids=data.visit_node_ids,
                            edge_idx=data.global_edge_index,
                            edge_attr=data.global_edge_attr,
                            visit_times=data.visit_rel_times,
-                           visit_order=data.visit_order,
                            attn_mask=data.attn_mask,
                            **additional_data)
 
             out = output['logits']
             prototypes = output['prototypes']
-            embeddings = output['embeddings']
 
             loss = 0.
+            labels = data.labels
+
+            for criterion in criterions:
+                loss += criterion(out[0], labels)
+
+            epoch_loss.append(loss.item())
+
+            if task == 'los_prediction':
+                probability = F.softmax(out[0], dim=-1)
+            else:
+                probability = torch.sigmoid(out[0])
+
+            prob_all.append(probability.cpu())
+            target_all.append(labels.cpu())
+
+    results = {}
+
+    epoch_loss_avg = np.mean(epoch_loss)
+    logger.info(f"Epoch: {epoch_idx:4d},  [{global_iter_idx[0]:5d}], Epoch Loss: {epoch_loss_avg}")
+    mlflow.log_metric(key='val_epoch_loss', value=epoch_loss_avg, step=epoch_idx)
+
+    prob_all = np.concatenate(prob_all, axis=0)
+    target_all = np.concatenate(target_all, axis=0)
+
+    for metric in metrics:
+        score = metric.calculate(prob_all, target_all)
+        mlflow.log_metric(key=f'val_{metric.NAME}', value=score, step=epoch_idx)
+        results[metric.NAME] = score
+
+    return results
+
+
+def single_test(model, task, dataloader, epoch_idx, metrics=[]):
+    model.eval()
+    prob_all = []
+    target_all = []
+
+    for _, data in enumerate(tqdm(dataloader)):
+        data = data.to(device)
+
+        with torch.no_grad():
+            additional_data = {
+                'cat_node_ids': data.cat_node_ids,
+                'cat_edge_ids': data.cat_edge_ids,
+                'cat_edge_index': data.cat_edge_index,
+                'visit_nodes': data.visit_nodes,
+                'visit_node_type': data.visit_node_type,
+                'ehr_nodes': data.ehr_nodes,
+                'batch': data.batch,
+            }
+
+            output = model(node_ids=data.visit_node_ids,
+                           edge_idx=data.global_edge_index,
+                           edge_attr=data.global_edge_attr,
+                           visit_times=data.visit_rel_times,
+                           attn_mask=data.attn_mask,
+                           **additional_data)
+
+            out = output['logits']
+            embeddings = output['embeddings']
+
             if task == 'pretrain':
-                labels_1 = data.set_trans_label
+                labels_1 = data.trans_label
                 labels_2 = data.gru_label
 
                 visit_mask = data.attn_mask.all(dim=-1)
@@ -499,39 +515,18 @@ def single_validate(model,
 
                 labels_1 = labels_1[visit_mask].view(-1, labels_1.size(-1))
 
-                for criterion in criterions:
-                        if criterion.NAME == 'binary_entropy':
-                            loss += criterion(out[0], labels_1)
-                            loss += criterion(out[1], labels_2)
-
-                        elif criterion.NAME == 'contrastive_loss':
-                            loss += criterion(embeddings['visit_embed'], data.attn_mask)
-
                 metric_out = out[1]
                 metric_labels = labels_2
 
+            elif task == 'get_prototypes':
+                metric_out = out[1]
+                metric_labels = data.labels
+
             else:
                 labels = data.labels
-            
-                # Main Model Finetune
-                if model_type == 'base':
-                    for criterion in criterions:
-                        if criterion.TYPE == 'prototype':
-                            visit_prototypes = prototypes['visit_prototypes']
-                            patient_prototypes = prototypes['patient_prototypes']
-                            loss += criterion([visit_prototypes, patient_prototypes])
-
-                        else:
-                            loss += criterion(out[0], labels)
-                # Baselines
-                else:
-                    for criterion in criterions:
-                        loss += criterion(out[0], labels)
 
                 metric_out = out[0]
                 metric_labels = labels
-
-            epoch_loss.append(loss.item())
 
             if task == 'los_prediction':
                 probability = F.softmax(metric_out, dim=-1)
@@ -541,28 +536,22 @@ def single_validate(model,
             prob_all.append(probability.cpu())
             target_all.append(metric_labels.cpu())
 
-            if embeddings is not None:
-                for k, v in embeddings.items():
-                    if v is not None:
-                        embed_all[k].append(v.cpu())
-
-    epoch_loss_avg = np.mean(epoch_loss)
-    logger.info(f"Epoch: {epoch_idx:4d},  [{global_iter_idx[0]:5d}], Epoch Loss: {epoch_loss_avg}")
-    if writer is not None:
-        writer.add_scalar('val/epoch_loss', epoch_loss_avg, epoch_idx)
-
-    label_all = target_all
-
-    prob_all = np.concatenate(prob_all, axis=0)
-    target_all = np.concatenate(target_all, axis=0)
-
     results = {}
-    for metric in metrics:
-        score = metric.calculate(prob_all, target_all)
-        metric.log(score, logger, writer=writer, global_iter=global_iter_idx[0], name_prefix='val/')
-        results[metric.NAME] = score
 
-    return results, embed_all, label_all, attn_mask_all
+    if task != 'get_prototypes':
+        prob_all = np.concatenate(prob_all, axis=0)
+        target_all = np.concatenate(target_all, axis=0)
+
+        for metric in metrics:
+            score = metric.calculate(prob_all, target_all)
+            if isinstance(score, list):
+                for idx, s in enumerate(score):
+                    mlflow.log_metric(key=f'test_{metric.NAME}_{metric.K[idx]}', value=s, step=epoch_idx)
+            else:
+                mlflow.log_metric(key=f'test_{metric.NAME}', value=score, step=epoch_idx)
+            results[metric.NAME] = score
+
+    return results
 
 
 if __name__ == '__main__':
