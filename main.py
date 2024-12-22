@@ -11,7 +11,7 @@ from mlflow.tracking import MlflowClient
 
 from dataset.dataset import MIMICBaseDataset
 from dataloader.dataloader import DataLoader
-from model.model_1 import MODELS
+from model.model import MODELS
 from trainer.optimizer import OPTIMIZERS
 from trainer.scheduler import SCHEDULERS
 from trainer.criterion import CRITERIONS
